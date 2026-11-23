@@ -1,6 +1,8 @@
 # FitRota PWA
 
-FitRota 1.4, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, tarifler ve günlükler bu cihazdaki tarayıcıda saklanır.
+FitRota 1.4.1, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, tarifler ve günlükler bu cihazdaki tarayıcıda saklanır.
+
+**Hakkında** bölümü masaüstünde sol menüden, telefonda **Profilim → Hakkında** yolundan açılır.
 
 ### Beslenme ve antrenman
 

@@ -648,7 +648,8 @@ function profileView(){
   const p=state.profile;
   const energy=calculateEnergy(p);
   const options=(items,selected)=>items.map(([val,label])=>`<option value="${val}" ${selected===val?'selected':''}>${escapeHTML(label)}</option>`).join('');
-  return `<div class="head-row"><div><h1>Profilim</h1><p class="subcopy">Güncel ölçülerini, vücut hedefini ve plan tercihlerini düzenle.</p></div></div>
+  return `<div class="head-row"><div><h1>Profilim</h1><p class="subcopy">Güncel ölçülerini, vücut hedefini ve plan tercihlerini düzenle.</p></div>
+    <button type="button" class="btn btn-secondary btn-sm" data-tab="about">Hakkında</button></div>
   <div class="profile-layout"><section class="card form-card"><h2>Ölçüler ve hedefler</h2>
     <form id="profile-form"><fieldset class="profile-section"><legend>Güncel ölçüler</legend><div class="form-grid">
       <div class="field"><label for="name">İsmin (isteğe bağlı)</label><input id="name" name="name" maxlength="50" value="${escapeHTML(p.name)}" placeholder="İsmin" autocomplete="nickname"></div>
@@ -681,10 +682,22 @@ function profileView(){
     </div></aside>
   </div>${banner()}`;
 }
+
+function aboutView() {
+  return `<div class="about-layout">
+    <header class="head-row"><div><h1>FitRota hakkında</h1>
+      <p class="subcopy">FitRota ile öğünlerini kaydedebilir, antrenmanlarını planlayabilir ve hedeflerine doğru ilerlemeni takip edebilirsin.</p></div></header>
+    <section class="card info-card about-thanks" aria-labelledby="about-thanks-heading">
+      <h2 id="about-thanks-heading">Teşekkür</h2>
+      <p>Ahsenciğime, bana bu fikri verdiği ve bu yolda benimle olduğu için teşekkür ederim. İyi ki varsın.</p>
+    </section>
+  </div>`;
+}
+
 function activeTab() {
   const tab = location.hash.slice(1);
   if (tab==='session') return state.workoutSession ? tab : 'training';
-  return ['home','nutrition','training','profile'].includes(tab) ? tab : 'home';
+  return ['home','nutrition','training','profile','about'].includes(tab) ? tab : 'home';
 }
 function render() {
   const tab = activeTab();
@@ -697,12 +710,12 @@ function render() {
     else element.removeAttribute('aria-current');
   });
   const main = document.getElementById('main-content');
-  const view = {home:homeView,nutrition:nutritionView,training:trainingView,profile:profileView,session:workoutSessionView}[tab];
+  const view = {home:homeView,nutrition:nutritionView,training:trainingView,profile:profileView,about:aboutView,session:workoutSessionView}[tab];
   main.innerHTML = `<div class="page-view${tabChanged?' page-enter':''}">${view()}</div>`;
   updateAIControls();
   syncSessionSetDock();
   document.querySelector('.avatar').textContent=(state.profile.name.trim().split(/\s+/).map(word=>word[0]).join('').slice(0,2)||'FR').toLocaleUpperCase('tr');
-  document.title=`${{home:'Genel Bakış',nutrition:'Beslenme',training:'Antrenman',profile:'Profilim',session:'Antrenman modu'}[tab]} • FitRota`;
+  document.title=`${{home:'Genel Bakış',nutrition:'Beslenme',training:'Antrenman',profile:'Profilim',about:'Hakkında',session:'Antrenman modu'}[tab]} • FitRota`;
   if (tabChanged) {
     window.scrollTo(0,0);
     const heading = main.querySelector('h1');

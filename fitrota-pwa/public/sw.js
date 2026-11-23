@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'fitrota-shell-';
-const CACHE = CACHE_PREFIX + 'v13';
+const CACHE = CACHE_PREFIX + 'v14';
 const SHELL = ['/index.html', '/styles.css', '/app.js', '/calorie.js', '/body-goals.js', '/food.js', '/recipes.js', '/menus.js', '/workouts.js', '/focused-workouts.js', '/exercise-videos.js', '/workout-session.js', '/workout-sound.js', '/manifest.webmanifest',
   '/images/dashboard-cover.webp', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'];
 
