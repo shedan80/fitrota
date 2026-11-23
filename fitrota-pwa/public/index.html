@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0c1110" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="FitRota" />
+  <meta name="description" content="FitRota ile beslenme ve antrenman rutinini tek yerden yönet." />
+  <meta name="color-scheme" content="dark" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/styles.css" />
+  <title>FitRota — Senin Ritmin, Senin Yolun</title>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar" aria-label="Ana menü">
+      <a class="brand" href="#home" data-tab="home" aria-label="FitRota ana sayfa">
+        <span class="brand-mark" aria-hidden="true">→</span>
+        <span>fit<span class="brand-highlight">rota</span><span class="brand-dot">.</span></span>
+      </a>
+      <nav id="desktop-nav" class="desktop-nav" aria-label="Sayfalar">
+        <button type="button" class="nav-item is-active" data-tab="home" aria-current="page"><span class="nav-icon">⌂</span> Genel Bakış</button>
+        <button type="button" class="nav-item" data-tab="nutrition"><span class="nav-icon">◉</span> Beslenme</button>
+        <button type="button" class="nav-item" data-tab="training"><span class="nav-icon">▤</span> Antrenman</button>
+        <button type="button" class="nav-item" data-tab="profile"><span class="nav-icon">♙</span> Profilim</button>
+      </nav>
+      <div class="sidebar-spacer"></div>
+      <div class="sidebar-footer">FitRota 1.4.0</div>
+    </aside>
+
+    <div class="layout-main">
+      <header class="topbar">
+        <a class="mobile-brand" href="#home" data-tab="home"><span class="brand-mark">→</span><span>fit<span class="brand-highlight">rota</span><span class="brand-dot">.</span></span></a>
+        <a class="topbar-title" href="#home" data-tab="home">FitRota</a>
+        <div class="topbar-actions">
+          <span class="status-pill"><span class="pulse-dot"></span><span class="status-location">Cihazda kayıt · </span>v1.4.0</span>
+          <button class="avatar" type="button" data-tab="profile" aria-label="Profil ekranına git">FR</button>
+        </div>
+      </header>
+
+      <main id="main-content" class="content" tabindex="-1"></main>
+      <footer class="footer">FitRota bir sağlık hizmeti değildir. Öneriler genel bilgilendirme amaçlıdır; özel sağlık ihtiyaçlarında uzman görüşü alın.</footer>
+    </div>
+
+    <nav class="bottom-nav" aria-label="Mobil menü">
+      <button class="bottom-item is-active" type="button" data-tab="home" aria-label="Genel bakış"><span class="bottom-icon">⌂</span><span>Özet</span></button>
+      <button class="bottom-item" type="button" data-tab="nutrition" aria-label="Beslenme"><span class="bottom-icon">◉</span><span>Beslenme</span></button>
+      <button class="bottom-item" type="button" data-tab="training" aria-label="Antrenman"><span class="bottom-icon">▤</span><span>Antrenman</span></button>
+      <button class="bottom-item" type="button" data-tab="profile" aria-label="Profil"><span class="bottom-icon">♙</span><span>Profilim</span></button>
+    </nav>
+  </div>
+  <div class="session-set-dock" id="session-set-dock" hidden>
+    <button class="btn btn-primary" type="submit" form="session-set-form">Seti tamamla</button>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
