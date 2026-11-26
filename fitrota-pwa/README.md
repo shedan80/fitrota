@@ -1,15 +1,21 @@
 # FitRota PWA
 
-FitRota 1.4.1, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, tarifler ve günlükler bu cihazdaki tarayıcıda saklanır.
+FitRota 1.8.0, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, kilo geçmişi, kişisel besinler, tarifler, antrenman planları ve günlükler bu cihazdaki tarayıcıda saklanır.
 
 **Hakkında** bölümü masaüstünde sol menüden, telefonda **Profilim → Hakkında** yolundan açılır.
 
 ### Beslenme ve antrenman
 
+- **Öğünü kopyala.** Bir besini ya da tarifi eklerken istersen Kahvaltı, Öğle, Akşam veya Ara öğün seç. **Önceki öğünü kopyala** listesinden bir öğün seçince o öğünün porsiyonları ve kalorileri bugüne eklenir. Öğün seçimi olmayan eski kayıtlar günlük toplamda kalır ve son eklenenler üzerinden tek tek yeniden kaydedilebilir.
+- **Kişisel besin.** Beslenme’de **Kendi besinimi kaydet** düğmesiyle besin adını ve 100 g başına kaloriyi kaydet. Besin ve tarif malzemesi aramalarında kendi besinlerin de görünür. Aynı kişisel adı yeniden kaydetmek değeri günceller. Düzenlemek veya silmek için önce besin adını ara ve kaydetme ekranını aç.
+- **Haftalık özet.** Özet ekranındaki **Bu hafta** kartı pazartesiden bugüne kaydedilen antrenmanları, plan tamamlamalarını ve beslenme kaydı olan günleri gösterir. Karşılaştırılabilir setler varsa bir hareketin son iki seansı arasındaki gelişimi de gösterir.
+
 - **Öğün kaydı.** Örneğin `200 g yoğurt` yazdığında katalog eşleşmesi ve porsiyondan toplam kalori hesaplanır. 213 kayıt içeren katalogda Türkçe karakter kullanmadan ve kelimelerin sırasını değiştirerek arayabilirsin. Katalog dışı paketli ürünler için gramı ve ürün etiketindeki **kcal / 100 g** değerini gir. Toplam kalori her iki durumda da elle düzeltilebilir. Besin aramasının hemen altındaki **Son eklenenler** ve **Kayıtlı tarifler** düğmeleri porsiyonu tek dokunuşla günlüğe ekler.
 - **Öğün oluşturucu.** Beslenme ekranında tarif adını, malzemeleri ve gramlarını gir. Kalori değeri katalogdan veya ürün etiketinden alınır. Porsiyon sayısına göre toplam ve porsiyon başına tahmini kaloriyi gör, tarifi kaydet ve sonraki günlerde tek dokunuşla bir porsiyon ekle. Tarifler tarayıcıda saklanır ve çevrimdışı kullanılabilir.
-- **Haftalık menü.** Karışık ve vejetaryen seçenekleriyle üç örnek hafta dönüşümlü gelir. Her öneri örnek porsiyon ağırlığı ve o porsiyonun tahmini kalorisini gösterir. Beslenme ekranındaki **Menüyü değiştir** düğmesi sıradaki örnek haftayı gösterir. Daha eski AI menülerine porsiyon eklemek için planı Profilim ekranından yeniden oluşturabilirsin.
+- **Haftalık menü.** Yerel menü kahvaltı, öğle, akşam ve ara öğün havuzlarını ayrı ayrı karıştırır. Karışık ve vejetaryen tercihlerine göre aynı haftada her öğün türü için yedi farklı öneri gelir. Gram ve tahmini kalori önerinin örnek porsiyonuna aittir. **Menüyü değiştir** yeni bir menü gösterir ve yenilemeden sonra seçimi korur. AI menüleri Profilim ekranından yeniden oluşturulabilir.
 - **Antrenman.** Hedef, gün sayısı, seviye ve ekipman seçimi kuvvet, yürüyüş, dans kardiyosu, pilates ve gövde denge seanslarını belirler. Planlı bir seansı tamamlarken süreyi düzenleyebilir veya bisiklet ve koşu gibi plan dışı aktiviteleri de kaydedebilirsin.
+- **Haftalık antrenman günlüğü.** Antrenman ekranındaki **Antrenman günlüğü** düğmesi mevcut haftanın seanslarını açar. **Hafta seç** ile kayıtlı geçmiş haftalara git. Her hafta için seans sayısı, toplam süre ve hesaplanabilen tahmini aktif kalori görünür. Rehberli antrenmanların kayıtlı set ayrıntılarını seansın altında açabilirsin.
+- **Kendi antrenmanın.** Antrenman ekranında bir bölge seç ve **Kendi antrenmanını oluştur** düğmesini kullan. Ekipmana uygun hareketleri listeden ekleyebilir veya kendi hareket adını yazabilirsin. Hareket başına set, tekrar ya da tutuş süresi ve 0–300 saniye dinlenme ayarla. Her bölgeye bir plan kaydedilir. **Kaydet ve başlat** ile planı sayaçlı antrenman moduna al.
 - **Bölgesel antrenman.** Özet’te **Bölge seç ve çalış** düğmesine veya **Antrenman** sekmesine dokun. Antrenman ekranının üstündeki **Bölgesel antrenman** kartında göğüs, sırt, omuz, kol, bacak, kalça veya karın ve gövdeyi doğrudan seç. Ekipman ve profil seviyesine göre planlanmış hareket, set, tekrar ve dinlenme sürelerini gör. Kas geliştirme kuvvet odaklıdır. Yağ kaybı seçeneği seçili bölgeyi kuvvet çalışmasıyla hedefler ve genel kardiyo ekler. Seansı kaydettiğinde günlük antrenman listesine eklenir.
 - **Hareket videoları.** Bölgesel ve haftalık programda her hareketin altında bir YouTube bağlantısı bulunur. Eşleşen örnek varsa video, diğer hareketlerde isimle arama açılır. Videolar için internet bağlantısı gerekir. Set, tekrar ve süre bilgileri FitRota planında gösterilir.
 - **Antrenman Modu.** Bölge seçiminin altındaki **Antrenmanı başlat** düğmesiyle ısınmadan soğumaya kadar sırayla ilerle. Amaç, ekipman ve süre **Planı düzenle** altında. Setlerde yaptığın tekrarları, süreli hareketlerde tutuş süreni ve varsa ağırlığı kaydet. Mobilde **Seti tamamla** düğmesi alt menünün üzerinde sabit kalır. Dinlenme çemberini duraklatabilir veya atlayabilirsin. Süre dolunca iki tonlu ses çalar. Son seansın setleri aynı hareket tekrar geldiğinde gösterilir. **Antrenmana dön** düğmesi kaydedilmiş son adıma götürür.
@@ -20,6 +26,10 @@ MET değerleri için [2024 Adult Compendium of Physical Activities](https://paco
 Bölgesel seans kalori hesabı blok bazında `(MET − 1) × 3,5 × kilo × dakika / 200` formülünü kullanır. Kuvvet bloklarında hazırlık ve set araları ortalamaya dahildir. Süre değiştirildiğinde bloklar orantılı güncellenir. Kilo yoksa gösterilen 70 kg örneği kişisel kayda yazılmaz. Gerçek harcama tempon ve eforuna göre değişir.
 
 ### Temel özellikler
+
+- **Renk teması.** Sağ üstteki **Yeşil** ve **Pembe** düğmeleri uygulamanın renklerini değiştirir. Seçim aynı tarayıcıda korunur.
+
+- **Kilo geçmişi ve trendi.** Özet’te **Kilo geçmişi → Ölçüm ekle** ile bugüne veya geçmiş bir tarihe ölçüm ekle. Aynı tarihi tekrar kaydetmek ölçümü günceller. Bugünkü kayıt ve Profilim’de değiştirdiğin kilo güncel kiloyu da günceller. **30 gün**, **90 gün** ya da **Tümü** ile ölçümleri ve son yedi takvim günündeki mevcut ölçümlerin ortalamasını gör. Önceki sürümlerde tarih tutulmayan profil kilosu, güncel kilo olarak korunur.
 
 - **Vücut hedefi.** Profilim ekranında güncel boyunu, güncel kilonu, hedef kilonu ve vücut hedefini ayarla. Özet ekranı hedefe olan farkı ve başlangıç ölçümünden ilerlemeyi gösterir. Hedef kilo, günlük enerji formülünü değiştirmeden takip edilir.
 - **Mobil gezinme.** Alt menü dokunmatik kullanım için düzenlendi. Sayfa geçişleri kısa bir animasyonla gösterilir ve işletim sisteminin hareketi azaltma tercihi uygulanır.

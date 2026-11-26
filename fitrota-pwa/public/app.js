@@ -1,15 +1,21 @@
 import {calculateEnergy, ACTIVITY_LEVELS, dateKey} from './calorie.js';
 import {weightGoalProgress} from './body-goals.js';
+import {MAX_WEIGHT_KG, MIN_WEIGHT_KG, normalizeWeightHistory, upsertWeight, validWeightMeasurement, weightTrend} from './weight-history.js';
+import {drawWeightTrend} from './weight-chart.js';
 import {exerciseVideos} from './exercise-videos.js';
 import {MAX_SET_COUNT, MAX_SET_WEIGHT, completeWorkoutBlock, createWorkoutSession, normalizeSetHistory,
   normalizeWorkoutSession, recordSessionSet, restRemaining, sessionWorkout, toggleSessionRest} from './workout-session.js';
 import {enableWorkoutSound, playRestChime} from './workout-sound.js';
-import {FOODS, findFood, suggestFoods, estimateFoodCalories, parseFoodText} from './food.js';
+import {FOODS, MAX_PERSONAL_FOODS, findFood, suggestFoods, estimateFoodCalories, normalizePersonalFoods, parseFoodText} from './food.js';
+import {MEAL_LABELS, mealType, previousMeals} from './food-diary.js';
+import {weeklyProgress} from './weekly-progress.js';
+import {journalWeeks, weekEnd, weekStart as weekKey, weeklyWorkoutLog} from './workout-journal.js';
 import {MAX_INGREDIENTS, MAX_SERVINGS, MAX_RECIPES, summarizeRecipe, normalizeRecipes} from './recipes.js';
-import {MENU_VARIANTS, WEEKDAYS, weeklyMenu, validMealPortion} from './menus.js';
+import {WEEKDAYS, weeklyMenu, validMealPortion} from './menus.js';
 import {ACTIVITIES, EQUIPMENT, MAX_WORKOUT_MINUTES, buildWorkouts, estimateActiveCalories,
   validWorkoutMinutes, workoutMinutes} from './workouts.js';
-import {FOCUS_REGIONS, FOCUS_GOALS, buildFocusedWorkout, estimateFocusedWorkout} from './focused-workouts.js';
+import {FOCUS_REGIONS, FOCUS_GOALS, buildFocusedWorkout, estimateFocusedWorkout, regionalExercises} from './focused-workouts.js';
+import {buildCustomWorkout, MAX_CUSTOM_MOVEMENTS, MAX_CUSTOM_SETS, MAX_REST_SECONDS, normalizeCustomPlan, normalizeCustomPlans} from './custom-workouts.js';
 
 'use strict';
 const REFERENCE_WEIGHT_KG = 70;
@@ -19,6 +25,7 @@ const STORAGE_KEY = 'fitrota-v1'; // Eski kullanıcının yerel verilerini koru.
 const SHORT_DAYS = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'];
 const GOALS = {denge:'Kilomu korumak', yag:'Yağ kaybı', kas:'Kas geliştirme', form:'Kondisyon geliştirme'};
 const DIETS = {karisik:'Karışık beslenme', vejetaryen:'Vejetaryen'};
+const WEIGHT_RANGES = [{days:30,label:'30 gün'},{days:90,label:'90 gün'},{days:0,label:'Tümü'}];
 const TYPES = [
   {key:'breakfast',label:'KAHVALTI',emoji:'🥣'},
   {key:'lunch',label:'ÖĞLE',emoji:'🥗'},
@@ -33,6 +40,10 @@ let busy = false;
 let toastTimer;
 let renderedTab;
 let focusDraft = null;
+let customRegion = null;
+const customDrafts = new Map();
+let journalWeek = null;
+let weightRange = 30;
 let restDeadline;
 let restFrame;
 let restRefresh;
@@ -53,9 +64,9 @@ function normalizeProfile(input) {
   p.allergies = String(input.allergies ?? '').trim().slice(0,160);
   p.age = finiteRange(input.age,18,85);
   p.heightCm = finiteRange(input.heightCm,130,230);
-  p.weightKg = finiteRange(input.weightKg,35,300);
-  p.targetWeightKg = finiteRange(input.targetWeightKg,35,300);
-  p.weightGoalStartKg = p.targetWeightKg === null ? null : finiteRange(input.weightGoalStartKg,35,300) ?? p.weightKg;
+  p.weightKg = finiteRange(input.weightKg,MIN_WEIGHT_KG,MAX_WEIGHT_KG);
+  p.targetWeightKg = finiteRange(input.targetWeightKg,MIN_WEIGHT_KG,MAX_WEIGHT_KG);
+  p.weightGoalStartKg = p.targetWeightKg === null ? null : finiteRange(input.weightGoalStartKg,MIN_WEIGHT_KG,MAX_WEIGHT_KG) ?? p.weightKg;
   p.sex = ['male','female'].includes(input.sex) ? input.sex : '';
   p.activity = Object.hasOwn(ACTIVITY_LEVELS,input.activity) ? input.activity : defaults.activity;
   p.equipment = Object.hasOwn(EQUIPMENT,input.equipment) ? input.equipment : defaults.equipment;
@@ -70,11 +81,12 @@ function normalizeFoodLogs(raw) {
   if(!raw || typeof raw!=='object' || Array.isArray(raw))return {};
   const out={};
   for(const [key,items] of Object.entries(raw).slice(-365)){
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(key) || !Array.isArray(items))continue;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(key) || !Number.isFinite(Date.parse(key+'T12:00:00')) || !Array.isArray(items))continue;
     out[key] = items.slice(-MAX_DAILY_FOOD_ENTRIES).filter(x=>x && typeof x.id==='string' && typeof x.name==='string' &&
       Number.isFinite(x.kcal) && x.kcal>=0 && x.kcal<=MAX_ENTRY_KCAL).map(x=>({
       id:x.id.slice(0,64),name:x.name.slice(0,70),kcal:Math.round(x.kcal),
-      grams:finiteRange(x.grams,1,2000), estimated:x.estimated===true, recipePortion:x.recipePortion===true
+      grams:finiteRange(x.grams,1,2000), estimated:x.estimated===true, recipePortion:x.recipePortion===true,
+      meal:mealType(x.meal)
     }));
   }
   return out;
@@ -83,6 +95,7 @@ function normalizeWorkoutLogs(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.filter(log => log && typeof log.id === 'string' && typeof log.title === 'string' &&
     typeof log.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(log.date) &&
+    dateKey(new Date(log.date+'T12:00:00')) === log.date &&
     validWorkoutMinutes(log.minutes) && (log.kcal === null || Number.isFinite(log.kcal) && log.kcal >= 0))
     .map(log => ({id:log.id, date:log.date, title:log.title.slice(0,100), minutes:log.minutes,
       kcal:log.kcal, planId:log.planId, day:log.day, sets:normalizeSetHistory(log.sets)}));
@@ -90,7 +103,8 @@ function normalizeWorkoutLogs(raw) {
 
 function initialState() {
   return {profile:{...defaults}, plan:localPlan(defaults), source:'local', planId:'initial',
-    completed:[], foodLogs:{}, recipes:[], workoutLogs:[], workoutSession:null, workoutSound:true, focusSettings:null, menuOffset:0};
+    completed:[], foodLogs:{}, personalFoods:[], recipes:[], weightHistory:[], workoutLogs:[], workoutSession:null, workoutSound:true,
+    focusSettings:null, customPlans:{}, theme:'green', menuOffset:0};
 }
 
 function readState() {
@@ -102,14 +116,17 @@ function readState() {
       const isAI = saved.source === 'ai' && validPlan(saved.plan);
       const restored = {...initialState(), profile, plan:isAI ? saved.plan : localPlan(profile),
         source:isAI ? 'ai' : 'local', planId:typeof saved.planId==='string'?saved.planId:'initial',
-        menuOffset:Number.isInteger(saved.menuOffset)?saved.menuOffset:0,
+        menuOffset:Number.isInteger(saved.menuOffset) && saved.menuOffset >= 0 ? saved.menuOffset >>> 0 : 0,
+        weightHistory:normalizeWeightHistory(saved.weightHistory),
         workoutLogs:normalizeWorkoutLogs(saved.workoutLogs),
         workoutSession:normalizeWorkoutSession(saved.workoutSession),
         workoutSound:saved.workoutSound !== false,
         focusSettings:normalizedFocusSettings(saved.focusSettings),
+        customPlans:normalizeCustomPlans(saved.customPlans),
+        theme:saved.theme==='pink'?'pink':'green',
         completedWeek:saved.completedWeek ?? weekKey(),
         completed:Array.isArray(saved.completed)?saved.completed.filter(x=>typeof x==='string'):[],
-        foodLogs:normalizeFoodLogs(saved.foodLogs), recipes:normalizeRecipes(saved.recipes)};
+        foodLogs:normalizeFoodLogs(saved.foodLogs), personalFoods:normalizePersonalFoods(saved.personalFoods), recipes:normalizeRecipes(saved.recipes)};
       // Eski, tarihsiz tamamlamaları ilk açılışın haftasına sabitle.
       if (legacyCompletion) {
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(restored)); } catch (_) {}
@@ -128,10 +145,22 @@ function save() {
     return false;
   }
 }
-function weekKey() {
-  const monday = new Date();
-  monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
-  return dateKey(monday);
+
+function applyTheme() {
+  document.documentElement.dataset.theme = state.theme;
+  document.querySelector('meta[name="theme-color"]').content = state.theme==='pink'?'#180f19':'#0c1110';
+  document.querySelectorAll('[data-theme-choice]').forEach(button => {
+    button.setAttribute('aria-pressed',String(button.dataset.themeChoice===state.theme));
+  });
+  paintWeightChart();
+}
+
+function selectTheme(theme) {
+  if (!['green','pink'].includes(theme) || state.theme===theme) return;
+  const previous = state.theme;
+  state.theme = theme;
+  if (!save()) { state.theme = previous; return; }
+  applyTheme();
 }
 function completedThisWeek() {
   const week = weekKey();
@@ -223,12 +252,86 @@ function bodyGoalsView(inProfile = false) {
   </section>`;
 }
 
+const weightDateFormat = new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'});
+function visibleWeightTrend() {
+  return weightTrend(state.weightHistory,weightRange,dateKey());
+}
+
+function weightTrendView() {
+  const points = visibleWeightTrend();
+  const filters = WEIGHT_RANGES.map(({days,label}) => `<button type="button" data-weight-range="${days}" aria-pressed="${days===weightRange}">${label}</button>`).join('');
+  const chart = points.length >= 2 ? `<figure class="weight-figure">
+    <canvas id="weight-chart" role="img" aria-label="${points.length} ölçüm · ${formatMeasurement.format(points[0].kg)} kg ile başlayıp ${formatMeasurement.format(points.at(-1).kg)} kg ile bitiyor"></canvas>
+    <figcaption><span class="weight-key weight-key-measured">Ölçüm</span><span class="weight-key">7 günlük ortalama</span></figcaption>
+    </figure>` : `<p class="weight-empty">${points.length
+      ? 'Trend için farklı iki tarihte ölçüm kaydet.'
+      : state.weightHistory.length ? 'Bu aralıkta ölçüm yok.' : 'İlk ölçümünü kaydederek kilo geçmişini başlat.'}</p>`;
+  const delta = points.length >= 2 ? Math.round((points.at(-1).kg - points[0].kg) * 10) / 10 : null;
+  const change = delta === null ? '' : `<span class="weight-change">${delta>0?'+':''}${formatMeasurement.format(delta)} kg değişim</span>`;
+  return `<div class="weight-trend-head">${change}<div class="weight-ranges" role="group" aria-label="Grafik aralığı">${filters}</div></div>${chart}`;
+}
+
+function weightHistoryView() {
+  const today = dateKey();
+  const history = state.weightHistory.filter(entry => entry.date <= today);
+  const latest = history.at(-1);
+  const measurements = history.length ? `<details class="weight-measurements">
+      <summary>Ölçümler (${history.length})</summary>
+      <ul>${history.slice().reverse().map(entry => `<li><time datetime="${entry.date}">${weightDateFormat.format(new Date(entry.date))}</time>
+        <strong>${formatMeasurement.format(entry.kg)} kg</strong>
+        <button type="button" class="text-action" data-edit-weight="${entry.date}" aria-label="${weightDateFormat.format(new Date(entry.date))} ölçümünü düzenle">Düzenle</button>
+      </li>`).join('')}</ul>
+    </details>` : '';
+  return `<section class="card weight-card" id="weight-history" aria-labelledby="weight-history-heading">
+    <header class="weight-card-heading">
+      <div><h2 id="weight-history-heading" tabindex="-1">Kilo geçmişi</h2>
+        ${latest ? `<p class="weight-current"><strong>${formatMeasurement.format(latest.kg)} <small>kg</small></strong><span>Son ölçüm · ${weightDateFormat.format(new Date(latest.date))}</span></p>` : ''}
+      </div>
+      <details id="weight-editor">
+        <summary>Ölçüm ekle</summary>
+        <form id="weight-form">
+          <div class="field"><label for="weight-date">Ölçüm tarihi</label><input id="weight-date" name="date" type="date" max="${today}" value="${today}" required></div>
+          <div class="field"><label for="weight-amount">Kilo (kg)</label><input id="weight-amount" name="amount" type="number" min="${MIN_WEIGHT_KG}" max="${MAX_WEIGHT_KG}" step="0.1" inputmode="decimal"
+            value="${latest?.date===today?latest.kg:''}" placeholder="Örn. 78,2" required></div>
+          <button type="submit" class="btn btn-primary btn-sm">Ölçümü kaydet</button>
+        </form>
+      </details>
+    </header>
+    <div id="weight-trend-content">${weightTrendView()}</div>
+    ${measurements}
+  </section>`;
+}
+
+function paintWeightChart() {
+  const canvas = document.getElementById('weight-chart');
+  if (canvas) drawWeightTrend(canvas,visibleWeightTrend());
+}
+
+function weeklyProgressView() {
+  const {workouts,foodDays,improvement} = weeklyProgress(state.workoutLogs,state.foodLogs,weekKey(),dateKey());
+  const completed = completedThisWeek();
+  const done = state.plan.workouts.filter(workout => completed.includes(workout.day)).length;
+  const total = state.plan.workouts.length;
+  let change = '';
+  if (improvement) {
+    const unit = improvement.unit === 'seconds' ? 'sn' : 'tekrar';
+    const comparison = improvement.moreCount
+      ? `+${improvement.moreCount} ${unit}${improvement.weightKg === null ? '' : ` · ${formatMeasurement.format(improvement.weightKg)} kg`}`
+      : `+${formatMeasurement.format(improvement.moreWeight)} kg · ${improvement.count} ${unit}`;
+    change = `<div><dt>${escapeHTML(improvement.name)}</dt><dd>${comparison}</dd></div>`;
+  }
+  return `<section class="card weekly-strip" aria-labelledby="weekly-progress-heading">
+    <h2 id="weekly-progress-heading">Bu hafta</h2>
+    <dl class="weekly-summary">
+      <div><dt>Antrenman</dt><dd>${number(workouts)} seans kayıtlı${total ? ` · Plan ${done}/${total}` : ''}</dd></div>
+      ${change}
+      <div><dt>Beslenme kaydı</dt><dd>${foodDays}/7 gün</dd></div>
+    </dl>
+  </section>`;
+}
+
 function homeView() {
   const energy=calculateEnergy(state.profile);
-  const completed = completedThisWeek();
-  const done=state.plan.workouts.filter(w=>completed.includes(w.day)).length;
-  const total=state.plan.workouts.length;
-  const pct=total?Math.round(done/total*100):0;
   const name=state.profile.name ? `, ${escapeHTML(state.profile.name)}` : '';
   const today=dayIndex();
   const todaysMeals=visibleMenu()[today];
@@ -240,6 +343,7 @@ function homeView() {
   const remainingText=remaining===null?'Hedef belirlenmedi':remaining>=0?`${number(remaining)} kcal hedefe kalan`:`${number(-remaining)} kcal hedefin üzerinde`;
   return `<section class="overview-head overview-cover"><div><p class="eyebrow">${escapeHTML(todayName())}</p><h1>Bugünün rotası${name}</h1><p class="subcopy">Günlük öğünlerini ve antrenmanını takip et.</p><div class="overview-actions"><button class="btn btn-primary" data-tab="nutrition">Öğün kaydet</button><button class="btn btn-secondary" data-tab="${state.workoutSession?'session':'training'}">${state.workoutSession?'Antrenmana dön':'Bölge seç ve çalış'}</button></div></div></section>
   ${bodyGoalsView()}
+  ${weightHistoryView()}
   <div class="overview-grid">
     <section class="card calories-card"><div class="card-heading"><div><h2>Günlük kalori dengesi</h2></div><span class="corner-mark">→</span></div>
       <div class="calories-body">${energyRing(energy)}<div class="calorie-details"><span class="detail-caption">TAHMİNİ GÜNLÜK HEDEF</span><div class="target-value">${energy?.target!=null?number(energy.target):'—'}<span> kcal</span></div><div class="remaining-line">${remainingText}</div></div></div>
@@ -253,7 +357,7 @@ function homeView() {
     <section class="card today-card"><div class="today-card-head"><span class="today-emoji">🥗</span><span class="eyebrow">ÖĞÜN ÖNERİSİ</span></div><h3>${escapeHTML(todaysMeals.lunch)}</h3><p class="meal-portion">${mealPortionText(todaysMeals,'lunch') || 'Öğle yemeği için örnek fikir.'}</p><button class="text-action" data-tab="nutrition">7 günlük menüyü gör <span>→</span></button></section>
     <section class="card today-card"><div class="today-card-head"><span class="today-emoji">${workout?'🏋️':'🌿'}</span><span class="eyebrow">BUGÜNKÜ ANTRENMAN</span></div><h3>${workout?escapeHTML(workout.title):'Aktif dinlenme günü'}</h3><p>${workout?escapeHTML(workoutSummary(workout)):'Bugün planlı antrenmanın yok. Hafif hareket veya dinlenme tercih edebilirsin.'}</p><button class="text-action" data-tab="training">Antrenmanları aç <span>→</span></button></section>
   </div>
-  <section class="card weekly-strip"><div><div class="eyebrow">HAFTALIK İLERLEME</div><h3>${done} / ${total} antrenman tamamlandı</h3></div><div class="weekly-meter"><div class="progress-track" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Haftalık antrenman ilerlemesi"><div class="progress-fill" style="width:${pct}%"></div></div><strong>${pct}%</strong></div></section>
+  ${weeklyProgressView()}
   <section class="card activity-summary"><div><h3>Bugünkü antrenman kaydı</h3><p class="small-muted">${workoutLogs.length ? `${workoutLogs.length} seans · ${number(workoutLogs.reduce((sum, log) => sum + log.minutes, 0))} dk` : 'Henüz antrenman kaydı yok.'}</p></div>
     <div class="activity-value"><strong>${active === null ? '—' : `≈ ${number(active)} kcal`}</strong><span>Tahmini aktif yakım</span></div>
     <button class="btn btn-secondary btn-sm" data-tab="training">Antrenmanları aç</button></section>
@@ -297,6 +401,20 @@ function foodQuickAddView() {
     </div>`;
 }
 
+function foodDiaryEntries(logs) {
+  const groups = [];
+  const hasMeals = logs.some(entry => entry.meal);
+  for (const meal of [...Object.keys(MEAL_LABELS),'']) {
+    const entries = logs.filter(entry => entry.meal === meal).reverse();
+    if (!entries.length) continue;
+    const heading = hasMeals ? `<h3>${MEAL_LABELS[meal] ?? 'Öğün seçilmemiş'}</h3>` : '';
+    groups.push(`<div class="food-meal-group">${heading}${entries.map(entry => `<div class="food-entry">
+      <div><strong>${escapeHTML(entry.name)}</strong><span>${entry.recipePortion ? '1 porsiyon · ' : entry.grams ? number(entry.grams) + ' g · ' : ''}${entry.estimated ? '≈ ' : ''}${number(entry.kcal)} kcal</span></div>
+      <button type="button" class="remove-food" data-remove-food="${escapeHTML(entry.id)}" aria-label="${escapeHTML(entry.name)} kaydını sil">✕</button></div>`).join('')}</div>`);
+  }
+  return `<div class="food-list">${groups.join('')}</div>`;
+}
+
 function foodDiary(){
   const energy=calculateEnergy(state.profile);
   const logs=todayEntries();
@@ -308,19 +426,49 @@ function foodDiary(){
     <form id="food-form" class="food-form">
       <div class="field food-name"><label for="food-name">Öğün / besin</label><input id="food-name" name="name" maxlength="70" required placeholder="Örn. 200 g yoğurt" autocomplete="off" aria-describedby="food-estimate"></div>
       <div id="food-suggestions" class="food-suggestions" role="group" aria-label="Eşleşen besinler" hidden></div>
+      <div class="food-tools">
+        <button class="btn btn-secondary btn-sm" type="button" data-action="copy-meal" aria-haspopup="dialog">Önceki öğünü kopyala</button>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="personal-food" aria-haspopup="dialog">Kendi besinimi kaydet</button>
+      </div>
       <div id="food-quick-add">${foodQuickAddView()}</div>
       <div class="field"><label for="food-grams">Porsiyon (g)</label><input id="food-grams" name="grams" type="number" min="1" max="2000" step="1" inputmode="numeric" placeholder="Örn. 200"></div>
       <div class="field food-rate"><label for="food-rate">Etiket (kcal / 100 g)</label><input id="food-rate" name="rate" type="number" min="0" max="900" step="any" inputmode="decimal" placeholder="İsteğe bağlı"></div>
       <div class="field food-kcal"><label for="food-kcal">Kalori (kcal)</label><input id="food-kcal" name="kcal" inputmode="numeric" type="number" min="0" max="${MAX_ENTRY_KCAL}" step="1" required placeholder="kcal"></div>
+      <div class="field food-meal"><label for="food-meal">Öğün (isteğe bağlı)</label><select id="food-meal" name="meal"><option value="">Öğün seçilmedi</option>${selectOptions(MEAL_LABELS)}</select></div>
       <button type="submit" class="btn btn-primary">+ Ekle</button>
       <div class="food-feedback">
         <p id="food-estimate" class="form-help" role="status">Katalogda ${FOODS.length} besin ve tarif var. Diğer ürünler için gramı ve etiketteki kcal / 100 g değerini gir.</p>
       </div>
     </form>
     <div class="diary-list-head"><strong>Bugünün kayıtları</strong><span>${logs.length} kayıt</span></div>
-    ${logs.length?`<div class="food-list">${logs.slice().reverse().map(x=>`<div class="food-entry"><div><strong>${escapeHTML(x.name)}</strong><span>${x.recipePortion ? '1 porsiyon · ' : x.grams ? number(x.grams) + ' g · ' : ''}${x.estimated ? '≈ ' : ''}${number(x.kcal)} kcal</span></div><button type="button" class="remove-food" data-remove-food="${escapeHTML(x.id)}" aria-label="${escapeHTML(x.name)} kaydını sil">✕</button></div>`).join('')}</div>`:'<div class="no-food">Henüz kayıt yok. İlk öğününü ekleyerek başlayabilirsin.</div>'}
+    ${logs.length?foodDiaryEntries(logs):'<div class="no-food">Henüz kayıt yok. İlk öğününü ekleyerek başlayabilirsin.</div>'}
     <p class="data-local">↳ Kayıtlar bu tarayıcıdaki localStorage’da tutulur.</p>
   </section>`;
+}
+
+function foodDialogsView() {
+  return `<dialog id="meal-copy-dialog" class="card food-dialog" aria-labelledby="meal-copy-heading">
+    <div class="card-heading"><h2 id="meal-copy-heading">Önceki öğünü kopyala</h2>
+      <form method="dialog"><button class="btn btn-ghost btn-sm" type="submit" autofocus>Kapat</button></form>
+    </div>
+    <p class="small-muted">Bir öğün seç. İçindeki besinler ve porsiyonlar bugüne eklenecek.</p>
+    <div id="meal-copy-options"></div>
+    <p class="form-help" role="status"></p>
+  </dialog>
+  <dialog id="personal-food-dialog" class="card food-dialog" aria-labelledby="personal-food-heading">
+    <div class="card-heading"><h2 id="personal-food-heading">Kendi besinimi kaydet</h2>
+      <form method="dialog"><button class="btn btn-ghost btn-sm" type="submit">Kapat</button></form>
+    </div>
+    <form id="personal-food-form">
+      <div class="field"><label for="personal-food-name">Besin adı</label><input id="personal-food-name" name="name" maxlength="70" placeholder="Örn. Annemin pilavı" required autofocus></div>
+      <div class="field"><label for="personal-food-rate">Kalori (kcal / 100 g)</label><input id="personal-food-rate" name="rate" type="number" min="0" max="900" step="any" inputmode="decimal" required></div>
+      <p class="form-help" role="status"></p>
+      <div class="personal-food-actions">
+        <button class="btn btn-primary" type="submit">Besini kaydet</button>
+        <button class="btn btn-ghost" type="button" data-action="remove-personal-food" hidden>Kişisel besini sil</button>
+      </div>
+    </form>
+  </dialog>`;
 }
 function recipeIngredientView(index) {
   return `<fieldset class="recipe-ingredient">
@@ -400,7 +548,7 @@ function menuView() {
 
 function nutritionView() {
   return `<div class="head-row"><div><div class="eyebrow">◉ BESLENME</div><h1>Beslenmeni takip et.</h1><p class="subcopy">Öğünlerini kaydet, haftalık menü fikirlerine göz at.</p></div><button class="btn btn-secondary btn-sm" data-tab="profile">⚙ Hedefi düzenle</button></div>
-    ${foodDiary()}${recipeBuilderView()}<section id="weekly-menu">${menuView()}</section>`;
+    ${foodDiary()}${foodDialogsView()}${recipeBuilderView()}<section id="weekly-menu">${menuView()}</section>`;
 }
 function workoutBurnText(activity, minutes) {
   const weight = state.profile.weightKg;
@@ -504,6 +652,7 @@ function focusedWorkoutView() {
       ${focusChoices(FOCUS_REGIONS,'region','Çalışacağın bölge',settings.region)}
       <div class="session-entry-actions">
         <button class="btn btn-primary" type="button" data-session-action="start">${state.workoutSession?'Antrenmana dön':'Antrenmanı başlat'}</button>
+        <button class="btn btn-secondary" type="button" data-action="open-custom-workout">Kendi antrenmanını oluştur</button>
       </div>
       <details class="focus-plan-options" id="focus-plan-options">
         <summary><strong>Planı düzenle</strong><span id="focus-plan-summary">${focusPlanSummary(settings,minutes)}</span></summary>
@@ -519,13 +668,122 @@ function focusedWorkoutView() {
   </section>`;
 }
 
+function customDraft(region) {
+  return customDrafts.get(region) ?? state.customPlans[region] ?? {
+    region,equipment:focusDraft?.equipment ?? state.focusSettings?.equipment ?? state.profile.equipment,exercises:[]
+  };
+}
+
+function customMovementOptions(region,equipment) {
+  return regionalExercises(region,equipment).map(item => `<option value="${escapeHTML(item.name)}">${escapeHTML(item.name)}</option>`).join('');
+}
+
+function customMovementRows(exercises) {
+  const value = number => Number.isFinite(number) ? number : '';
+  return exercises.map((move,index) => {
+    const slot = index+1;
+    const seconds = move.unit === 'seconds';
+    return `<fieldset class="custom-movement" data-custom-row data-name="${escapeHTML(move.name)}" data-unit="${move.unit}" data-equipment="${move.equipment}">
+      <legend>${escapeHTML(move.name)} <small>· ${EQUIPMENT[move.equipment]}</small></legend>
+      <div class="custom-fields">
+        <div class="field"><label for="custom-sets-${slot}">Set</label>
+          <input type="number" id="custom-sets-${slot}" data-quantity="sets" min="1" max="${MAX_CUSTOM_SETS}" step="1" value="${value(move.sets)}" inputmode="numeric" required></div>
+        <div class="field"><label for="custom-count-${slot}">${seconds?'Tutuş (sn)':'Tekrar'}</label>
+          <input type="number" id="custom-count-${slot}" data-quantity="count" min="1" max="${MAX_SET_COUNT[move.unit]}" step="1" value="${value(move.count)}" inputmode="numeric" required></div>
+        <div class="field"><label for="custom-rest-${slot}">Dinlenme (sn)</label>
+          <input type="number" id="custom-rest-${slot}" data-quantity="restSeconds" min="0" max="${MAX_REST_SECONDS}" step="1" value="${value(move.restSeconds)}" inputmode="numeric" required></div>
+      </div>
+      <button class="text-action custom-remove" type="button" data-custom-action="remove" data-index="${index}" aria-label="${escapeHTML(move.name)} hareketini kaldır">Kaldır</button>
+    </fieldset>`;
+  }).join('');
+}
+
+function customPlanSummary(draft) {
+  if (!draft.exercises.length) return 'Bölge ve ekipman seçip ilk hareketi ekle.';
+  const plan = normalizeCustomPlan(draft);
+  if (!plan) return 'Set, tekrar, tutuş ve dinlenme sayılarını kontrol et.';
+  const workout = buildCustomWorkout(plan);
+  const minutes = Math.ceil(workout.minutes);
+  const weight = state.profile.weightKg;
+  const estimate = estimateFocusedWorkout(workout,minutes,weight ?? REFERENCE_WEIGHT_KG);
+  const count = plan.exercises.reduce((sum,move) => sum+move.sets,0);
+  return `${plan.exercises.length} hareket · ${count} set · ≈ ${number(minutes)} dk${estimate? ` · ≈ ${number(estimate.kcal)} aktif kcal${weight===null?' (70 kg örneği)':''}`:''}`;
+}
+
+function customWorkoutForm(region) {
+  const draft = customDraft(region);
+  return `<form id="custom-workout-form" data-region="${region}">
+    <div class="custom-picker">
+      <div class="field"><label for="custom-region">Bölge</label><select id="custom-region" name="region">${selectOptions(FOCUS_REGIONS,region)}</select></div>
+      <div class="field"><label for="custom-equipment">Ekipman</label><select id="custom-equipment" name="equipment">${selectOptions(EQUIPMENT,draft.equipment)}</select></div>
+    </div>
+    <div class="custom-add-move">
+      <div class="field"><label for="custom-exercise">Bölgeye uygun hareket</label>
+        <select id="custom-exercise" name="exercise">${customMovementOptions(region,draft.equipment)}</select></div>
+      <button type="button" class="btn btn-secondary btn-sm" data-custom-action="add">Hareket ekle</button>
+    </div>
+    <details class="custom-manual">
+      <summary>Kendi hareketimi yaz</summary>
+      <div class="custom-add-move">
+        <div class="field"><label for="custom-name">Hareket adı</label><input id="custom-name" name="movementName" maxlength="100" placeholder="Örn. Bantla yana yürüyüş"></div>
+        <div class="field"><label for="custom-unit">Ölçüm türü</label><select id="custom-unit" name="unit"><option value="reps">Tekrar</option><option value="seconds">Süre (sn)</option></select></div>
+        <button type="button" class="btn btn-secondary btn-sm" data-custom-action="add-manual">Kendi hareketimi ekle</button>
+      </div>
+    </details>
+    <div id="custom-movements">${customMovementRows(draft.exercises)}</div>
+    <p id="custom-plan-preview" class="small-muted" role="status">${customPlanSummary(draft)}</p>
+    <div class="custom-plan-actions">
+      <button type="submit" name="intent" value="save" class="btn btn-secondary">Planı kaydet</button>
+      ${state.workoutSession?'<button type="button" class="btn btn-primary" data-session-action="start">Antrenmana dön</button>':
+        '<button type="submit" name="intent" value="start" class="btn btn-primary">Kaydet ve başlat</button>'}
+    </div>
+  </form>`;
+}
+
+function customWorkoutView() {
+  const region = customRegion ?? focusDraft?.region ?? state.focusSettings?.region ?? 'chest';
+  return `<details class="card custom-workout" id="custom-workout">
+    <summary>Kendi antrenmanını oluştur</summary>
+    ${customWorkoutForm(region)}
+  </details>`;
+}
+
+const journalDateFormat = new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'long',weekday:'long'});
+const journalWeekFormat = new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'short',year:'numeric'});
+
+function workoutJournalEntry(log) {
+  const sets = log.sets ?? [];
+  return `<div class="journal-entry">
+    <div class="food-entry"><div><strong>${escapeHTML(log.title)}</strong>
+      <span>${log.minutes} dk · ${log.kcal === null ? 'Yakım hesaplanmadı' : `≈ ${number(log.kcal)} aktif kcal`}</span></div>
+      <button type="button" class="remove-food" data-remove-workout="${escapeHTML(log.id)}" aria-label="${escapeHTML(log.title)} kaydını sil">✕</button></div>
+    ${sets.length ? `<details class="journal-sets"><summary>${sets.length} setin ayrıntıları</summary>
+      <ol>${sets.map(set => `<li><span>${escapeHTML(set.name)}</span> <strong>${performanceText(set)}</strong></li>`).join('')}</ol></details>` : ''}
+  </div>`;
+}
+
 function workoutJournalView() {
-  const logs = todayWorkoutLogs();
-  const entries = logs.slice().reverse().map(log => `<div class="food-entry"><div><strong>${escapeHTML(log.title)}</strong><span>${log.minutes} dk · ${log.kcal === null ? 'Yakım hesaplanmadı' : `≈ ${number(log.kcal)} aktif kcal`}</span></div>
-    <button type="button" class="remove-food" data-remove-workout="${escapeHTML(log.id)}" aria-label="${escapeHTML(log.title)} kaydını sil">✕</button></div>`).join('');
-  return `<div id="training-journal">
-    <div class="diary-list-head"><strong>Bugünkü antrenman kayıtları</strong><span>${logs.length} seans</span></div>
-    ${entries?`<div class="food-list">${entries}</div>`:'<div class="no-food">Henüz antrenman kaydı yok.</div>'}</div>`;
+  const today = dateKey();
+  const current = weekKey();
+  const selected = journalWeek && journalWeek <= current ? journalWeek : current;
+  const weeks = [...new Set([...journalWeeks(state.workoutLogs,today),selected])].sort().reverse();
+  const options = weeks.map(week => {
+    const start = new Date(week+'T12:00:00');
+    const end = new Date(weekEnd(week)+'T12:00:00');
+    const label = journalWeekFormat.formatRange(start,end);
+    return `<option value="${week}" ${week===selected?'selected':''}>${week===current?'Bu hafta · ':''}${label}</option>`;
+  }).join('');
+  const {days,workouts,minutes,kcal,estimated} = weeklyWorkoutLog(state.workoutLogs,selected,today);
+  const burn = estimated ? ` · ≈ ${number(kcal)} aktif kcal${estimated < workouts ? ` (${estimated} seans)` : ''}` : '';
+  const entries = days.map(([date,logs]) => `<div class="journal-day">
+    <h3>${date===today?'Bugün · ':''}${journalDateFormat.format(new Date(date+'T12:00:00'))}</h3>
+    ${logs.slice().reverse().map(workoutJournalEntry).join('')}</div>`).join('');
+  return `<section class="card diary-card" id="training-journal" aria-labelledby="training-journal-heading">
+    <div class="journal-head"><h2 id="training-journal-heading" tabindex="-1">Haftalık antrenman günlüğü</h2>
+      <div class="field"><label for="journal-week">Hafta seç</label><select id="journal-week">${options}</select></div></div>
+    <p class="journal-total">${workouts} seans · ${number(minutes)} dk${burn}</p>
+    ${entries || '<p class="no-food">Bu haftada antrenman kaydı yok.</p>'}
+  </section>`;
 }
 function trainingView() {
   const completed = completedThisWeek();
@@ -537,14 +795,17 @@ function trainingView() {
       ${done?`<button class="btn btn-secondary btn-full" type="button" data-undo-workout="${index}">✓ Tamamlandı · Geri al</button>`:workoutForm(workout,index)}</article>`;
   }).join('');
   const done = state.plan.workouts.filter(workout => completed.includes(workout.day)).length;
-  return `<div class="head-row"><div><div class="eyebrow">▤ ANTRENMAN</div><h1>Antrenmanların</h1><p class="subcopy">Planındaki seansları veya kendi aktivitelerini kaydet.</p></div><span class="small-tag">${done}/${state.plan.workouts.length} planlı seans tamamlandı</span></div>
+  return `<div class="head-row"><div><div class="eyebrow">▤ ANTRENMAN</div><h1>Antrenmanların</h1><p class="subcopy">Planındaki seansları veya kendi aktivitelerini kaydet.</p></div>
+    <div class="training-head-actions"><span class="small-tag">${done}/${state.plan.workouts.length} planlı seans tamamlandı</span>
+      <button class="btn btn-secondary btn-sm" type="button" data-action="open-workout-journal">Antrenman günlüğü ↓</button></div></div>
     ${focusedWorkoutView()}
+    ${customWorkoutView()}
     <div class="section-head"><h2>Haftalık program</h2><button class="text-action" data-tab="profile">Planı kişiselleştir →</button></div>
     <div class="activity-explainer">${state.profile.weightKg === null ? '<p>Kartlar 70 kg için örnek yakımı gösteriyor. Kendi tahminini görmek ve kaydetmek için <button class="inline-link" data-tab="profile">profiline kilonu ekle</button>.</p>' : ''}
       <p>Aktif kalori, dinlenmenin üzerindeki tahmini enerji harcamasıdır. Kilo, aktivite türü ve süreye göre hesaplanır.</p></div>
     <div class="grid workout-grid">${cards||'<p class="empty">Henüz antrenman bulunmuyor.</p>'}</div>
-    <section class="card diary-card"><div class="card-heading"><h2>Plan dışı aktivite ekle</h2></div>${workoutForm()}
-      ${workoutJournalView()}</section>`;
+    <section class="card diary-card"><div class="card-heading"><h2>Plan dışı aktivite ekle</h2></div>${workoutForm()}</section>
+    ${workoutJournalView()}`;
 }
 function formatRestTime(ms) {
   const seconds = Math.ceil(ms/1000);
@@ -569,7 +830,7 @@ function sessionStageView(session, workout) {
   const block = workout.blocks[session.blockIndex];
   if (!block) {
     const elapsed = Math.max(1,Math.round((session.finishedAt - session.startedAt)/60000));
-    const minutes = elapsed <= MAX_WORKOUT_MINUTES ? elapsed : workout.minutes;
+    const minutes = elapsed <= MAX_WORKOUT_MINUTES ? elapsed : Math.min(MAX_WORKOUT_MINUTES,Math.ceil(workout.minutes));
     return `<div class="session-step">
       <h2 tabindex="-1">Antrenmanı tamamladın</h2>
       <p>${session.sets.length} set kaydettin. Günlüğe girecek süreyi kontrol et.</p>
@@ -615,7 +876,7 @@ function sessionStageView(session, workout) {
     <form id="session-set-form">
       <div class="session-set-inputs">
         <div class="field"><label for="session-count">${seconds?'Tutuş süren (sn)':'Yaptığın tekrar'}</label>
-          <input id="session-count" name="count" type="number" min="1" max="${MAX_SET_COUNT[block.unit]}" step="1" inputmode="numeric" required></div>
+          <input id="session-count" name="count" type="number" min="1" max="${MAX_SET_COUNT[block.unit]}" step="1" inputmode="numeric" value="${block.count ?? ''}" required></div>
         <div class="field"><label for="session-weight">Ağırlık (kg, isteğe bağlı)</label>
           <input id="session-weight" name="weight" type="number" min="0" max="${MAX_SET_WEIGHT}" step="0.1" inputmode="decimal"></div>
       </div>
@@ -656,7 +917,8 @@ function profileView(){
       <div class="field"><label for="age">Yaş</label><input id="age" name="age" type="number" min="18" max="85" step="1" value="${p.age??''}" placeholder="Örn. 24"></div>
       <div class="field"><label for="sex">Hesaplama formülü (biyolojik cinsiyet)</label><select id="sex" name="sex"><option value="" ${!p.sex?'selected':''}>Seçiniz</option>${options([['female','Kadın formülü'],['male','Erkek formülü']],p.sex)}</select><small>Mifflin–St Jeor formülü bu iki katsayıyı kullanır.</small></div>
       <div class="field"><label for="heightCm">Güncel boy (cm)</label><input id="heightCm" name="heightCm" type="number" inputmode="decimal" min="130" max="230" step="0.1" value="${p.heightCm??''}" placeholder="Örn. 175"></div>
-      <div class="field"><label for="weightKg">Güncel kilo (kg)</label><input id="weightKg" name="weightKg" type="number" inputmode="decimal" min="35" max="300" step="0.1" value="${p.weightKg??''}" placeholder="Örn. 75"></div>
+      <div class="field"><label for="weightKg">Güncel kilo (kg)</label><input id="weightKg" name="weightKg" type="number" inputmode="decimal" min="${MIN_WEIGHT_KG}" max="${MAX_WEIGHT_KG}" step="0.1" value="${p.weightKg??''}" placeholder="Örn. 75">
+        <small>Kilo değişiklikleri bugünün tarihiyle geçmişe eklenir.</small></div>
     </div></fieldset>
     <fieldset class="profile-section"><legend>Hedefler</legend><div class="form-grid">
       <div class="field"><label for="goal">Vücut hedefi</label><select id="goal" name="goal">${options(Object.entries(GOALS),p.goal)}</select></div>
@@ -722,6 +984,7 @@ function render() {
     heading.setAttribute('tabindex','-1');
     heading.focus({preventScroll:true});
   }
+  paintWeightChart();
   syncWorkoutClock();
 }
 function navigateTo(tab) {
@@ -748,6 +1011,36 @@ function updateAIControls() {
   document.querySelector('[data-action="reset"]').disabled = busy;
 }
 function formValid(){return document.getElementById('profile-form')?.reportValidity()??false;}
+
+function applyProfile(profile) {
+  if (profile.weightKg !== null && profile.weightKg !== state.profile.weightKg) {
+    state.weightHistory = upsertWeight(state.weightHistory,dateKey(),profile.weightKg);
+  }
+  state.profile = profile;
+}
+
+function saveWeightMeasurement(form) {
+  const date = form.elements.date.value;
+  const kg = form.elements.amount.valueAsNumber;
+  const today = dateKey();
+  if (date > today || !validWeightMeasurement(date,kg)) {
+    notify('Ölçümün tarihini ve kilo değerini kontrol et.');
+    return;
+  }
+  const previous = {...state};
+  state.weightHistory = upsertWeight(state.weightHistory,date,kg);
+  if (date === today) {
+    const {targetWeightKg,weightGoalStartKg} = state.profile;
+    state.profile = {...state.profile,weightKg:kg,
+      weightGoalStartKg:targetWeightKg === null ? null : weightGoalStartKg ?? kg};
+  }
+  if (!save()) { state = previous; return; }
+  if (!visibleWeightTrend().some(entry => entry.date === date)) weightRange = 0;
+  render();
+  document.getElementById('weight-history-heading').focus({preventScroll:true});
+  notify('Kilo ölçümün kaydedildi.');
+}
+
 function saveProfile(){
   if(!formValid())return;
   const profile = profileFromForm();
@@ -760,7 +1053,7 @@ function saveProfile(){
     state.planId = uniqueId();
     state.completed = [];
   }
-  state.profile = profile;
+  applyProfile(profile);
   if (!save()) { state = previous; return; }
   currentDay = dayIndex();
   navigateTo('home');
@@ -768,14 +1061,21 @@ function saveProfile(){
 }
 async function generateAI(){
   if(busy||!aiAvailable||!formValid())return;
-  const profile=profileFromForm();busy=true;updateAIControls();
+  const profile=profileFromForm();
+  const originalProfile = state.profile;
+  busy=true;updateAIControls();
   try{
     const res=await fetch('/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:{goal:profile.goal,days:profile.days,diet:profile.diet,experience:profile.experience,equipment:profile.equipment,allergies:profile.allergies}})});
     const data=await res.json();
     if(!res.ok)throw new Error(data.error||'Yapay zekâya bağlanılamadı.');
     if(!validPlan(data.plan))throw new Error('Beklenen biçimde plan alınamadı.');
     const previous = {...state};
-    state.profile=profile;state.plan=data.plan;state.source='ai';state.planId=uniqueId();state.completed=[];
+    if (state.profile !== originalProfile) {
+      profile.weightKg = state.profile.weightKg;
+      if (profile.targetWeightKg === state.profile.targetWeightKg) profile.weightGoalStartKg = state.profile.weightGoalStartKg;
+    }
+    applyProfile(profile);
+    state.plan=data.plan;state.source='ai';state.planId=uniqueId();state.completed=[];
     if (!save()) { state = previous; return; }
     currentDay=dayIndex();
     if (activeTab() === 'home') render();
@@ -787,12 +1087,12 @@ async function generateAI(){
 function updateFoodForm(form, changed) {
   const {name, grams, rate, kcal} = form.elements;
   const parsed = parseFoodText(name.value);
-  const food = findFood(parsed.name);
+  const food = findFood(parsed.name,state.personalFoods);
 
   if (changed === name) {
     const suggestions = document.getElementById('food-suggestions');
-    const matches = food ? [] : suggestFoods(parsed.name);
-    suggestions.innerHTML = matches.map(match => `<button class="btn btn-secondary btn-sm" type="button" data-food-name="${escapeHTML(match.name)}">${escapeHTML(match.name)}</button>`).join('');
+    const matches = food ? [] : suggestFoods(parsed.name,state.personalFoods);
+    suggestions.innerHTML = matches.map(match => `<button class="btn btn-secondary btn-sm" type="button" data-food-name="${escapeHTML(match.name)}">${escapeHTML(match.name)}${state.personalFoods.includes(match)?'<small>Kişisel</small>':''}</button>`).join('');
     suggestions.hidden = matches.length === 0;
     document.getElementById('food-quick-add').hidden = name.value.trim() !== '';
 
@@ -836,15 +1136,15 @@ function updateFoodForm(form, changed) {
   }
 }
 
-function recordFood({name,grams=null,kcal,estimated=false,recipePortion=false,preserveDraft=recipePortion}) {
+function appendFoodEntries(newEntries,preserveDraft) {
   const key = dateKey();
   const previous = state.foodLogs[key];
   const entries = previous || [];
-  if (entries.length >= MAX_DAILY_FOOD_ENTRIES) {
+  if (entries.length + newEntries.length > MAX_DAILY_FOOD_ENTRIES) {
     notify(`Bir gün için en fazla ${MAX_DAILY_FOOD_ENTRIES} kayıt ekleyebilirsin.`);
     return false;
   }
-  state.foodLogs[key] = [...entries,{id:uniqueId(),name,grams,kcal,estimated,recipePortion}];
+  state.foodLogs[key] = [...entries,...newEntries.map(entry => ({...entry,id:uniqueId()}))];
   if (!save()) {
     if (previous) state.foodLogs[key] = previous;
     else delete state.foodLogs[key];
@@ -852,6 +1152,112 @@ function recordFood({name,grams=null,kcal,estimated=false,recipePortion=false,pr
   }
   renderFoodDiary(preserveDraft);
   return true;
+}
+
+function recordFood({name,grams=null,kcal,estimated=false,recipePortion=false,preserveDraft=recipePortion}) {
+  const meal = mealType(document.getElementById('food-meal').value);
+  return appendFoodEntries([{name,grams,kcal,estimated,recipePortion,meal}],preserveDraft);
+}
+
+const mealDateFormat = new Intl.DateTimeFormat('tr-TR',{day:'numeric',month:'short',year:'numeric'});
+function openMealCopy() {
+  const dialog = document.getElementById('meal-copy-dialog');
+  const {length:currentCount} = todayEntries();
+  const meals = previousMeals(state.foodLogs,dateKey());
+  dialog.querySelector('#meal-copy-options').innerHTML = meals.length ? `<div class="meal-copy-options">${meals.map(({date,meal,entries}) => {
+    const names = entries.slice(0,2).map(entry => escapeHTML(entry.name)).join(', ');
+    const total = entries.reduce((sum,entry) => sum + entry.kcal,0);
+    const fits = currentCount + entries.length <= MAX_DAILY_FOOD_ENTRIES;
+    return `<button type="button" class="quick-add-item" data-copy-date="${date}" data-copy-meal="${meal}" ${fits?'':'disabled'}>
+      <span><strong>${MEAL_LABELS[meal]} · ${mealDateFormat.format(new Date(date+'T12:00:00'))}</strong>
+      <small>${names}${entries.length>2?` ve ${entries.length-2} besin daha`:''} · ${number(total)} kcal</small></span>
+      <span class="quick-add-icon" aria-hidden="true">+</span></button>`;
+  }).join('')}</div>` : '<p class="no-food">Henüz kopyalanabilir bir öğün yok. Yeni bir kayıt eklerken Kahvaltı, Öğle, Akşam veya Ara öğün seç. Bu kayıt ertesi gün burada görünür.</p>';
+  dialog.querySelector('[role="status"]').textContent = meals.some(({entries}) => currentCount + entries.length > MAX_DAILY_FOOD_ENTRIES)
+    ? `Günlük ${MAX_DAILY_FOOD_ENTRIES} kayıt sınırını aşan öğünler seçilemez.` : '';
+  dialog.showModal();
+}
+
+function copyMeal(button) {
+  const dialog = button.closest('dialog');
+  const source = previousMeals(state.foodLogs,dateKey())
+    .find(({date,meal}) => date === button.dataset.copyDate && meal === button.dataset.copyMeal);
+  if (!source) return;
+  if (!appendFoodEntries(source.entries,true)) {
+    dialog.querySelector('[role="status"]').textContent = 'Öğün kaydedilemedi. Günlük kayıt sınırını ve tarayıcı depolamasını kontrol et.';
+    return;
+  }
+  dialog.close();
+  notify(`${MEAL_LABELS[source.meal]} bugüne kopyalandı · ${source.entries.length} kayıt`);
+}
+
+function personalFoodIndex(name) {
+  return state.personalFoods.indexOf(findFood(parseFoodText(name).name,state.personalFoods));
+}
+
+function updatePersonalFoodEditor(form) {
+  const existing = state.personalFoods[personalFoodIndex(form.elements.name.value)];
+  form.querySelector('[data-action="remove-personal-food"]').hidden = !existing;
+  form.querySelector('[role="status"]').textContent = existing ? 'Bu adla kaydedersen kişisel besinin değeri güncellenir.' : '';
+  if (existing) form.elements.rate.placeholder = existing.kcalPer100g;
+  else form.elements.rate.removeAttribute('placeholder');
+}
+
+function openPersonalFoodEditor() {
+  const diary = document.getElementById('food-form').elements;
+  const dialog = document.getElementById('personal-food-dialog');
+  const form = document.getElementById('personal-food-form');
+  const name = parseFoodText(diary.name.value).name;
+  const existing = state.personalFoods[personalFoodIndex(name)];
+  form.elements.name.value = existing?.name ?? name;
+  form.elements.rate.value = diary.rate.value || (existing?.kcalPer100g ?? '');
+  updatePersonalFoodEditor(form);
+  dialog.showModal();
+}
+
+function replacePersonalFoods(next) {
+  const previous = state.personalFoods;
+  state.personalFoods = next;
+  if (save()) return true;
+  state.personalFoods = previous;
+  document.querySelector('#personal-food-form [role="status"]').textContent = 'Besin kaydedilemedi. Tarayıcı depolamasını kontrol et.';
+  return false;
+}
+
+function addPersonalFood(form) {
+  const [food] = normalizePersonalFoods([{name:form.elements.name.value,kcalPer100g:form.elements.rate.valueAsNumber}]);
+  const status = form.querySelector('[role="status"]');
+  if (!food) {
+    status.textContent = 'Besin adını ve 100 g başına kalori değerini kontrol et.';
+    return;
+  }
+  const index = personalFoodIndex(food.name);
+  if (index < 0 && state.personalFoods.length >= MAX_PERSONAL_FOODS) {
+    status.textContent = `En fazla ${MAX_PERSONAL_FOODS} kişisel besin kaydedebilirsin.`;
+    return;
+  }
+  const next = state.personalFoods.slice();
+  if (index < 0) next.push(food);
+  else next[index] = food;
+  if (!replacePersonalFoods(next)) return;
+  form.closest('dialog').close();
+  const diary = document.getElementById('food-form');
+  const {grams} = parseFoodText(diary.elements.name.value);
+  diary.elements.name.value = grams === null ? food.name : `${grams} g ${food.name}`;
+  diary.elements.rate.value = '';
+  updateFoodForm(diary,diary.elements.name);
+  diary.elements.grams.focus({preventScroll:true});
+  notify(`${food.name} kişisel besinlerine eklendi.`);
+}
+
+function removePersonalFood(form) {
+  const index = personalFoodIndex(form.elements.name.value);
+  if (index < 0 || !confirm(`“${state.personalFoods[index].name}” kişisel besinlerinden silinsin mi?`)) return;
+  if (!replacePersonalFoods(state.personalFoods.filter((_,position) => position !== index))) return;
+  form.closest('dialog').close();
+  const diary = document.getElementById('food-form');
+  updateFoodForm(diary,diary.elements.name);
+  notify('Kişisel besin silindi.');
 }
 
 function renderFoodDiary(preserveDraft = false) {
@@ -873,6 +1279,7 @@ function addFood(form) {
   }
   const grams = finiteRange(input.get('grams'),1,2000);
   if (recordFood({name,grams,kcal,estimated:form.dataset.estimated==='true'})) {
+    document.getElementById('food-meal').value = mealType(input.get('meal'));
     document.getElementById('food-name').focus({preventScroll:true});
     notify(`${name} kaydedildi.`);
   }
@@ -881,7 +1288,7 @@ function addFood(form) {
 function updateRecipeIngredient(row) {
   const name = row.querySelector('[name="ingredient"]');
   const rate = row.querySelector('[name="rate"]');
-  const food = findFood(name.value);
+  const food = findFood(name.value,state.personalFoods);
   if (food) {
     rate.value = food.kcalPer100g;
     row.dataset.catalogRate = rate.value;
@@ -890,7 +1297,7 @@ function updateRecipeIngredient(row) {
     delete row.dataset.catalogRate;
   }
   const suggestions = row.querySelector('.recipe-suggestions');
-  const matches = food ? [] : suggestFoods(name.value);
+  const matches = food ? [] : suggestFoods(name.value,state.personalFoods);
   suggestions.innerHTML = matches.map(match =>
     `<button class="btn btn-secondary btn-sm" type="button" data-recipe-food="${escapeHTML(match.name)}">${escapeHTML(match.name)}</button>`).join('');
   suggestions.hidden = !matches.length;
@@ -1008,12 +1415,97 @@ function updateFocusedWorkout(form, changeDuration) {
   form.querySelector('#focus-plan-summary').textContent = focusPlanSummary(settings,minutes);
 }
 
+function readCustomDraft(form) {
+  return {region:form.dataset.region,equipment:form.elements.equipment.value,
+    exercises:[...form.querySelectorAll('[data-custom-row]')].map(row => ({
+      name:row.dataset.name,unit:row.dataset.unit,equipment:row.dataset.equipment,
+      sets:row.querySelector('[data-quantity="sets"]').valueAsNumber,
+      count:row.querySelector('[data-quantity="count"]').valueAsNumber,
+      restSeconds:row.querySelector('[data-quantity="restSeconds"]').valueAsNumber
+    }))};
+}
+
+function updateCustomDraft(form) {
+  const draft = readCustomDraft(form);
+  customDrafts.set(draft.region,draft);
+  form.querySelector('#custom-plan-preview').textContent = customPlanSummary(draft);
+  return draft;
+}
+
+function openCustomWorkout(focusedForm) {
+  const builder = document.getElementById('custom-workout');
+  const form = builder.querySelector('form');
+  customRegion = focusedForm.elements.region.value;
+  if (form.dataset.region !== customRegion) form.outerHTML = customWorkoutForm(customRegion);
+  builder.open = true;
+  builder.scrollIntoView({block:'start'});
+  builder.querySelector('#custom-region').focus({preventScroll:true});
+}
+
+function editCustomMovements(button) {
+  const form = button.form;
+  const draft = readCustomDraft(form);
+  const action = button.dataset.customAction;
+  if (action === 'remove') {
+    draft.exercises.splice(Number(button.dataset.index),1);
+  } else {
+    if (draft.exercises.length >= MAX_CUSTOM_MOVEMENTS) {
+      notify(`Bir plana en fazla ${MAX_CUSTOM_MOVEMENTS} hareket ekleyebilirsin.`);
+      return;
+    }
+    const manual = action === 'add-manual';
+    const selected = manual ? {name:form.elements.movementName.value.trim(),unit:form.elements.unit.value}
+      : regionalExercises(draft.region,draft.equipment).find(item => item.name === form.elements.exercise.value);
+    if (!selected?.name) {
+      notify('Eklemek istediğin hareketin adını yaz.');
+      form.elements.movementName.focus();
+      return;
+    }
+    draft.exercises.push({name:selected.name,unit:selected.unit,equipment:draft.equipment,
+      sets:state.profile.experience==='orta'?3:2,count:selected.unit==='seconds'?20:10,restSeconds:75});
+    if (manual) form.elements.movementName.value = '';
+  }
+  form.querySelector('#custom-movements').innerHTML = customMovementRows(draft.exercises);
+  updateCustomDraft(form);
+  const next = action === 'remove' ? form.querySelector('[data-custom-action="add"]') :
+    form.querySelector(`#custom-sets-${draft.exercises.length}`);
+  next?.focus({preventScroll:true});
+}
+
+function saveCustomWorkout(form,start) {
+  const plan = normalizeCustomPlan(readCustomDraft(form));
+  if (!plan) {
+    notify('Kaydetmek için en az bir hareket ve geçerli set bilgisi gir.');
+    return;
+  }
+  const previousPlans = state.customPlans;
+  const previousSession = state.workoutSession;
+  state.customPlans = {...previousPlans,[plan.region]:plan};
+  if (start && !previousSession) {
+    state.workoutSession = createWorkoutSession({id:uniqueId(),settings:null,
+      experience:state.profile.experience,customPlan:plan},Date.now());
+  }
+  if (!save()) {
+    state.customPlans = previousPlans;
+    state.workoutSession = previousSession;
+    return;
+  }
+  customDrafts.delete(plan.region);
+  if (start) {
+    if (state.workoutSound) enableWorkoutSound();
+    navigateTo('session');
+  } else notify(`${FOCUS_REGIONS[plan.region]} planın kaydedildi.`);
+}
+
 function recordWorkout(entry,settings = state.focusSettings) {
   const previousLogs = state.workoutLogs;
   const previousSettings = state.focusSettings;
   state.workoutLogs = [...previousLogs,{id:uniqueId(),date:dateKey(),...entry}];
   state.focusSettings = settings;
-  if (save()) return true;
+  if (save()) {
+    journalWeek = null;
+    return true;
+  }
   state.workoutLogs = previousLogs;
   state.focusSettings = previousSettings;
   return false;
@@ -1030,7 +1522,7 @@ function addFocusedWorkout(form) {
   }
   const kcal = estimateFocusedWorkout(workout,minutes,state.profile.weightKg)?.kcal ?? null;
   if (!recordWorkout({title:workout.title,minutes,kcal,planId:null},settings)) return;
-  document.getElementById('training-journal').outerHTML = workoutJournalView();
+  refreshWorkoutJournal();
   notify('Bölgesel antrenman günlüğe eklendi.');
 }
 
@@ -1168,7 +1660,8 @@ function finishWorkoutSession(form) {
   const workout = sessionWorkout(session);
   const kcal = estimateFocusedWorkout(workout,minutes,state.profile.weightKg)?.kcal ?? null;
   state.workoutSession = null;
-  if (!recordWorkout({id:session.id,title:workout.title,minutes,kcal,planId:null,sets:session.sets},session.settings)) {
+  if (!recordWorkout({id:session.id,title:workout.title,minutes,kcal,planId:null,sets:session.sets},
+    session.customPlan ? state.focusSettings : session.settings)) {
     state.workoutSession = session;
     return;
   }
@@ -1201,6 +1694,10 @@ function updateMenu(focusSelector) {
   section.innerHTML = menuView();
   section.querySelector(focusSelector)?.focus({preventScroll:true});
 }
+function refreshWorkoutJournal(focusWeek = false) {
+  document.getElementById('training-journal').outerHTML = workoutJournalView();
+  if (focusWeek) document.getElementById('journal-week').focus({preventScroll:true});
+}
 function installInstructions(){
   if(/iPad|iPhone|iPod/i.test(navigator.userAgent))notify('iPhone: Paylaş → Ana Ekrana Ekle');
   else if(/Android/i.test(navigator.userAgent))notify('Android: Tarayıcı menüsü → Uygulamayı yükle');
@@ -1211,6 +1708,8 @@ window.addEventListener('hashchange', () => {
   if (renderedTab !== activeTab()) render();
 });
 document.addEventListener('click',async e=>{
+  const themeChoice = e.target.closest('[data-theme-choice]');
+  if (themeChoice) { selectTheme(themeChoice.dataset.themeChoice); return; }
   const tabEl=e.target.closest('[data-tab]');
   if (tabEl) {
     e.preventDefault();
@@ -1220,6 +1719,28 @@ document.addEventListener('click',async e=>{
   }
   const sessionButton = e.target.closest('[data-session-action]');
   if (sessionButton) { handleSessionAction(sessionButton); return; }
+  const customButton = e.target.closest('[data-custom-action]');
+  if (customButton) { editCustomMovements(customButton); return; }
+  const range = e.target.closest('[data-weight-range]');
+  if (range) {
+    weightRange = Number(range.dataset.weightRange);
+    const trend = document.getElementById('weight-trend-content');
+    trend.innerHTML = weightTrendView();
+    trend.querySelector('[aria-pressed="true"]').focus({preventScroll:true});
+    paintWeightChart();
+    return;
+  }
+  const editWeight = e.target.closest('[data-edit-weight]');
+  if (editWeight) {
+    const entry = state.weightHistory.find(item => item.date === editWeight.dataset.editWeight);
+    const editor = document.getElementById('weight-editor');
+    editor.open = true;
+    const form = document.getElementById('weight-form');
+    form.elements.date.value = entry.date;
+    form.elements.amount.value = entry.kg;
+    form.elements.amount.focus();
+    return;
+  }
   const recipeButton = e.target.closest('[data-add-ingredient],[data-remove-ingredient],[data-recipe-food],[data-log-recipe],[data-delete-recipe]');
   if (recipeButton) { handleRecipeClick(recipeButton); return; }
   const recent = e.target.closest('[data-relog-food]');
@@ -1231,6 +1752,8 @@ document.addEventListener('click',async e=>{
     }
     return;
   }
+  const mealCopy = e.target.closest('[data-copy-meal]');
+  if (mealCopy) { copyMeal(mealCopy); return; }
   const dayEl = e.target.closest('[data-day]');
   if (dayEl) {
     currentDay = Number(dayEl.dataset.day);
@@ -1250,10 +1773,16 @@ document.addEventListener('click',async e=>{
   if (undo) {
     const {day} = state.plan.workouts[undo.dataset.undoWorkout];
     const week = weekKey();
+    const previousCompleted = state.completed;
+    const previousLogs = state.workoutLogs;
     if (state.completedWeek === week) state.completed = state.completed.filter(value => value !== day);
     state.workoutLogs = state.workoutLogs.filter(log => !(log.planId === state.planId &&
       log.day === day && log.date >= week && log.date <= dateKey()));
-    save();
+    if (!save()) {
+      state.completed = previousCompleted;
+      state.workoutLogs = previousLogs;
+      return;
+    }
     render();
     document.getElementById(`workout-minutes-${undo.dataset.undoWorkout}`)?.focus({preventScroll:true});
     notify('Tamamlama geri alındı.');
@@ -1261,9 +1790,14 @@ document.addEventListener('click',async e=>{
   }
   const removeWorkout = e.target.closest('[data-remove-workout]');
   if (removeWorkout) {
+    const previous = state.workoutLogs;
     state.workoutLogs = state.workoutLogs.filter(log => log.id !== removeWorkout.dataset.removeWorkout);
-    save();
+    if (!save()) {
+      state.workoutLogs = previous;
+      return;
+    }
     render();
+    document.getElementById('journal-week').focus({preventScroll:true});
     notify('Antrenman kaydı silindi.');
     return;
   }
@@ -1277,6 +1811,16 @@ document.addEventListener('click',async e=>{
     return;
   }
   const actionEl=e.target.closest('[data-action]');if(!actionEl)return;
+  if (actionEl.dataset.action === 'open-custom-workout') { openCustomWorkout(actionEl.form); return; }
+  if (actionEl.dataset.action === 'open-workout-journal') {
+    const heading = document.getElementById('training-journal-heading');
+    heading.scrollIntoView({block:'start'});
+    heading.focus({preventScroll:true});
+    return;
+  }
+  if (actionEl.dataset.action === 'copy-meal') { openMealCopy(); return; }
+  if (actionEl.dataset.action === 'personal-food') { openPersonalFoodEditor(); return; }
+  if (actionEl.dataset.action === 'remove-personal-food') { removePersonalFood(actionEl.form); return; }
   if (actionEl.dataset.action === 'open-recipes') {
     const builder = document.getElementById('recipe-builder');
     builder.open = true;
@@ -1290,20 +1834,25 @@ document.addEventListener('click',async e=>{
     return;
   }
   if (actionEl.dataset.action === 'rotate-menu') {
-    state.menuOffset = (state.menuOffset + 1) % MENU_VARIANTS;
-    save();
+    const previous = state.menuOffset;
+    state.menuOffset = (previous + 1) >>> 0;
+    if (!save()) { state.menuOffset = previous; return; }
     updateMenu('[data-action="rotate-menu"]');
     notify('Haftalık menü değiştirildi.');
     return;
   }
   if(actionEl.dataset.action==='generate-ai')return generateAI();
   if(actionEl.dataset.action==='reset'){
-    if(busy || !confirm('Bu tarayıcıdaki profilin, besin kayıtların, tariflerin, planın ve antrenmanların silinsin mi?'))return;
+    if(busy || !confirm('Bu tarayıcıdaki profilin, kilo geçmişin, besin kayıtların, kişisel besinlerin, tariflerin, kendi planların ve antrenmanların silinsin mi?'))return;
     try { localStorage.removeItem(STORAGE_KEY); }
     catch (_) { notify('Tarayıcı yerel verileri silmeye izin vermedi.'); return; }
     state=initialState();
     focusDraft = null;
-    currentDay=dayIndex();render();notify('Yerel veriler sıfırlandı.');
+    customRegion = null;
+    customDrafts.clear();
+    journalWeek = null;
+    weightRange = 30;
+    currentDay=dayIndex();applyTheme();render();notify('Yerel veriler sıfırlandı.');
   }
   if(actionEl.dataset.action==='install'){
     if(installingPrompt){installingPrompt.prompt();await installingPrompt.userChoice;installingPrompt=null;}
@@ -1312,7 +1861,8 @@ document.addEventListener('click',async e=>{
 });
 function updateEstimate(e) {
   const form = e.target.form;
-  if (form?.id === 'food-form') updateFoodForm(form,e.target);
+  if (form?.id === 'food-form' && e.target.name !== 'meal') updateFoodForm(form,e.target);
+  if (form?.id === 'personal-food-form' && e.target.name === 'name') updatePersonalFoodEditor(form);
   if (form?.id === 'recipe-form') {
     if (e.target.name === 'ingredient') updateRecipeIngredient(e.target.closest('.recipe-ingredient'));
     updateRecipeTotals(form);
@@ -1324,15 +1874,46 @@ function updateEstimate(e) {
   }
 }
 document.addEventListener('input', e => {
+  if (e.target.hasAttribute('data-quantity') && e.target.form?.id==='custom-workout-form') {
+    updateCustomDraft(e.target.form);
+    return;
+  }
   if (e.target.form?.id !== 'focus-workout-form' || e.target.name === 'minutes') updateEstimate(e);
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'custom-region') {
+    const form = e.target.form;
+    updateCustomDraft(form);
+    customRegion = e.target.value;
+    form.outerHTML = customWorkoutForm(customRegion);
+    document.getElementById('custom-region').focus({preventScroll:true});
+    return;
+  }
+  if (e.target.id === 'custom-equipment') {
+    const form = e.target.form;
+    const draft = updateCustomDraft(form);
+    form.elements.exercise.innerHTML = customMovementOptions(draft.region,draft.equipment);
+    return;
+  }
+  if (e.target.id === 'weight-date') {
+    const entry = state.weightHistory.find(item => item.date === e.target.value);
+    e.target.form.elements.amount.value = entry?.kg ?? '';
+    return;
+  }
+  if (e.target.id === 'journal-week') {
+    journalWeek = e.target.value || null;
+    refreshWorkoutJournal(true);
+    return;
+  }
   if (e.target.matches('select, #focus-workout-form input[type=radio]')) updateEstimate(e);
 });
 document.addEventListener('submit',e=>{
   if(e.target.id==='profile-form'){e.preventDefault();if(!busy)saveProfile();}
+  if(e.target.id==='weight-form'){e.preventDefault();saveWeightMeasurement(e.target);}
   if(e.target.id==='food-form'){e.preventDefault();addFood(e.target);}
+  if(e.target.id==='personal-food-form'){e.preventDefault();addPersonalFood(e.target);}
   if(e.target.id==='recipe-form'){e.preventDefault();addRecipe(e.target);}
+  if(e.target.id==='custom-workout-form'){e.preventDefault();saveCustomWorkout(e.target,e.submitter?.value==='start');}
   if (e.target.id === 'session-set-form') {
     e.preventDefault();
     submitSessionSet(e.target);
@@ -1351,9 +1932,11 @@ document.addEventListener('submit',e=>{
   }
 });
 window.visualViewport?.addEventListener('resize',positionSessionSetDock);
+window.addEventListener('resize',paintWeightChart);
 window.visualViewport?.addEventListener('scroll',positionSessionSetDock);
 document.addEventListener('visibilitychange', () => syncWorkoutClock());
 async function init(){
+  applyTheme();
   syncWorkoutClock(false);
   render();
   if ('serviceWorker' in navigator && window.isSecureContext) {

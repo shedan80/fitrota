@@ -1,6 +1,6 @@
 {
   "name": "fitrota-pwa",
-  "version": "1.4.1",
+  "version": "1.8.0",
   "private": true,
   "type": "module",
   "description": "FitRota — calorie goals, food logging and workouts PWA",

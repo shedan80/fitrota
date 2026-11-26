@@ -24,20 +24,26 @@ test('gram amounts in the food name and per-100g package labels support portion 
   assert.equal(estimateFoodCalories({kcalPer100g:901},55),null);
 });
 
-test('three weekly menus rotate without repeating a meal for either diet', () => {
+test('menus stay stable, reshuffle after a cycle and avoid repeating meals in a cycle', () => {
   for (const diet of ['karisik', 'vejetaryen']) {
     const weeks = [0, 1, 2].map(week => weeklyMenu(diet, week));
-    for (const menu of weeks) assert.deepEqual(menu.map(day => day.day), WEEKDAYS);
+    for (const [index,menu] of weeks.entries()) {
+      assert.deepEqual(menu.map(day => day.day),WEEKDAYS);
+      assert.deepEqual(menu,weeklyMenu(diet,index));
+      assert.notDeepEqual(menu,weeklyMenu(diet,index+3));
+    }
     for (const type of MEAL_KEYS) {
       assert.equal(new Set(weeks.flat().map(day => day[type])).size, 21);
       assert.ok(weeks.flat().every(day => validMealPortion(day.portions[type])));
     }
     assert.deepEqual(weeklyMenu(diet, 0, 1), weeks[1]);
   }
-  assert.ok(weeklyMenu('karisik', 0).some(day => day.lunch.includes('tavuk')));
-  assert.ok(weeklyMenu('vejetaryen', 0).every(day => !day.lunch.includes('tavuk')));
-  assert.deepEqual(weeklyMenu('karisik', 1).at(-1).portions.lunch, {grams:300,kcal:420});
-  assert.deepEqual(weeklyMenu('vejetaryen', 1).at(-1).portions.lunch, {grams:300,kcal:350});
+  const days = [0,1,2,3,4,5].flatMap(week => weeklyMenu('karisik',week));
+  assert.ok(days.some(day => day.lunch.includes('tavuk')));
+  const vegetarianDays = [0,1,2,3,4,5].flatMap(week => weeklyMenu('vejetaryen',week));
+  assert.ok(vegetarianDays.every(day => !/tavuk|hindi|somon|ton balık|balık|kıyma|etli/i.test(day.lunch+' '+day.dinner)));
+  assert.deepEqual(vegetarianDays.find(day => day.lunch==='Patatesli mercimek salatası').portions.lunch,{grams:300,kcal:350});
+  assert.deepEqual(days.find(day => day.lunch==='Somonlu patates salatası').portions.lunch,{grams:300,kcal:420});
   assert.equal(validMealPortion({grams:25,kcal:400}),false);
 });
 

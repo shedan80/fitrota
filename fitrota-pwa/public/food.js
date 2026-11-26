@@ -228,20 +228,36 @@ function normalizeName(name) {
 }
 
 const terms = new Map(FOODS.map(food => [food, [food.name, ...food.aliases].map(normalizeName)]));
+export const MAX_PERSONAL_FOODS = 100;
 
-export function findFood(name) {
-  const query = normalizeName(name);
-  return FOODS.find(food => terms.get(food).includes(query));
+export function normalizePersonalFoods(raw) {
+  if (!Array.isArray(raw)) return [];
+  const foods = new Map();
+  for (const food of raw.slice(-MAX_PERSONAL_FOODS)) {
+    if (typeof food?.name !== 'string' || calculateFoodEnergy(food,100) === null) continue;
+    const name = parseFoodText(food.name.trim().slice(0,70)).name.trim();
+    const key = normalizeName(name);
+    if (key) foods.set(key,{name,kcalPer100g:food.kcalPer100g});
+  }
+  return [...foods.values()];
 }
 
-export function suggestFoods(name) {
+export function findFood(name,personalFoods = []) {
+  const query = normalizeName(name);
+  return personalFoods.find(food => normalizeName(food.name) === query) ??
+    FOODS.find(food => terms.get(food).includes(query));
+}
+
+export function suggestFoods(name,personalFoods = []) {
   const query = normalizeName(name);
   if (query.length < 2) return [];
   const words = query.split(' ');
   const results = [];
-  for (const food of FOODS) {
+  const personalNames = new Set(personalFoods.map(food => normalizeName(food.name)));
+  const available = personalFoods.length ? [...personalFoods,...FOODS.filter(food => !personalNames.has(terms.get(food)[0]))] : FOODS;
+  for (const food of available) {
     let best = Infinity;
-    for (const term of terms.get(food)) {
+    for (const term of terms.get(food) ?? [normalizeName(food.name)]) {
       const tokens = term.split(' ');
       if (term === query) best = 0;
       else if (term.startsWith(query)) best = Math.min(best,1);

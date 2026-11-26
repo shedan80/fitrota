@@ -3,7 +3,7 @@ export const WEEKDAYS = ['Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cu
 export const MEAL_KEYS = ['breakfast', 'lunch', 'dinner', 'snack'];
 
 // Her fikir için yemek adı, örnek porsiyon (g) ve o porsiyonun yaklaşık kcal değeri.
-// Öğün başına 21 fikir, sırasıyla üç farklı haftaya ayrılır.
+// Havuzlar üç haftalık seçim döngüleri için ayrı ayrı karıştırılır.
 const breakfast = [
   ['Yulaf, sade yoğurt ve muz', 245, 300],
   ['Menemen ve tam tahıllı ekmek', 230, 285],
@@ -97,7 +97,7 @@ const snack = [
   ['Tam tahıllı tost ve lor', 95, 170],
 ];
 
-export const MENU_VARIANTS = 3;
+const WEEKS_PER_MENU_CYCLE = 3;
 
 export function validMealPortion(portion) {
   return Number.isInteger(portion?.grams) && portion.grams >= 1 && portion.grams <= 2000 &&
@@ -106,17 +106,33 @@ export function validMealPortion(portion) {
 }
 
 export function weeklyMenu(diet, week, offset = 0) {
-  const variant = ((week + offset) % MENU_VARIANTS + MENU_VARIANTS) % MENU_VARIANTS;
-  const preferred = options => (diet === 'vejetaryen' ? options[0] : options.at(-1));
+  const selection = week + offset;
+  const cycle = Math.floor(selection / WEEKS_PER_MENU_CYCLE);
+  const first = (selection - cycle * WEEKS_PER_MENU_CYCLE) * WEEKDAYS.length;
+  const mainMeals = groups => diet === 'vejetaryen' ? groups.map(options => options[0]) : groups.flat();
+  const pools = [breakfast,mainMeals(lunch),mainMeals(dinner),snack]
+    .map((pool,slot) => shuffled(pool,cycle * MEAL_KEYS.length + slot + 1));
   return WEEKDAYS.map((day, index) => {
-    const item = variant * WEEKDAYS.length + index;
-    const entries = [breakfast[item], preferred(lunch[item]), preferred(dinner[item]), snack[item]];
     const menu = {day, portions:{}};
-    entries.forEach(([name, grams, kcal], slot) => {
-      const type = MEAL_KEYS[slot];
+    MEAL_KEYS.forEach((type,slot) => {
+      const [name, grams, kcal] = pools[slot][first + index];
       menu[type] = name;
       menu.portions[type] = {grams, kcal};
     });
     return menu;
   });
+}
+
+function shuffled(pool,seed) {
+  const items = pool.slice();
+  // Seeded Fisher–Yates keeps the chosen menu stable across reloads and offline.
+  for (let index = items.length - 1; index > 0; index--) {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let value = Math.imul(seed ^ (seed >>> 15),seed | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7),value | 61);
+    const random = ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+    const other = Math.floor(random * (index + 1));
+    [items[index],items[other]] = [items[other],items[index]];
+  }
+  return items;
 }

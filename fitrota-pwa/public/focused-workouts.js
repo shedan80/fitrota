@@ -130,6 +130,13 @@ const moves = {
   },
 };
 
+export function regionalExercises(region,equipment) {
+  if (!Object.hasOwn(FOCUS_REGIONS,region) || !Object.hasOwn(EQUIPMENT,equipment)) return [];
+  return moves[region][equipment].map(([name,cue,quantity]) => ({
+    name,cue,quantity,unit:quantity?.includes('sn')?'seconds':'reps'
+  }));
+}
+
 export function buildFocusedWorkout({region,goal,equipment,experience}) {
   if (!Object.hasOwn(FOCUS_REGIONS,region) || !Object.hasOwn(FOCUS_GOALS,goal) ||
       !Object.hasOwn(EQUIPMENT,equipment)) return null;
@@ -143,8 +150,7 @@ export function buildFocusedWorkout({region,goal,equipment,experience}) {
   const activity = equipment === 'none' ? (region === 'core' ? 'core' : 'bodyweight') : 'strength';
   const blocks = [{name:'Dinamik ısınma', detail:'Rahat yürüyüş ve eklem hareketleri', activity:'core', minutes:5}];
 
-  for (const [name,cue,quantity] of moves[region][equipment]) {
-    const unit = quantity?.includes('sn') ? 'seconds' : 'reps';
+  for (const {name,cue,quantity,unit} of regionalExercises(region,equipment)) {
     const dose = unit === 'seconds' ? quantity : reps + ' tekrar' + (quantity ? ' / ' + quantity : '');
     blocks.push({name, sets, restSeconds:rest, unit, detail:`${sets} set × ${dose} · Set arası ${rest} sn`, cue, activity, minutes:blockMinutes});
   }
