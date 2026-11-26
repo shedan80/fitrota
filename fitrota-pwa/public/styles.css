@@ -269,6 +269,13 @@ html { scroll-behavior: auto; }
 }
 .pwa-update-actions { display:flex; gap:6px; }
 .pwa-update .btn { min-height:44px; }
+.daily-motivation {
+  display:flex; align-items:baseline; flex-wrap:wrap; gap:3px 12px; margin-top:14px;
+  padding:11px 15px; background:var(--panel); border:1px solid var(--edge); border-left:3px solid var(--lime); border-radius:10px;
+}
+.daily-motivation strong { font-size:12px; color:var(--lime); }
+.daily-motivation p, .session-step .session-motivation { margin:0; color:var(--text); font-size:13px; }
+.session-step .session-motivation { border-left:3px solid var(--lime); padding:6px 10px; background:var(--panel2); border-radius:0 8px 8px 0; }
 .body-card .goal-hint { margin: 12px 0 0; }
 .weight-card { margin-top:18px; min-width:0; }
 .weight-card-heading { display:flex; flex-wrap:wrap; align-items:start; justify-content:space-between; gap:10px 16px; }

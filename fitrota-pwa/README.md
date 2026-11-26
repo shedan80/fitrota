@@ -27,6 +27,7 @@ Bölgesel seans kalori hesabı blok bazında `(MET − 1) × 3,5 × kilo × daki
 
 ### Temel özellikler
 
+- **Günün sözü.** Özet ekranı ve antrenman bitişi günün yerel tarihine göre bir motivasyon sözü gösterir. Söz gün içinde sabit kalır ve çevrimdışı çalışır.
 
 - **Renk teması.** Sağ üstteki **Yeşil** ve **Pembe** düğmeleri uygulamanın renklerini değiştirir. Seçim aynı tarayıcıda korunur.
 

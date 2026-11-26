@@ -2,6 +2,7 @@ import {calculateEnergy, ACTIVITY_LEVELS, dateKey} from './calorie.js';
 import {weightGoalProgress} from './body-goals.js';
 import {MAX_WEIGHT_KG, MIN_WEIGHT_KG, normalizeWeightHistory, upsertWeight, validWeightMeasurement, weightTrend} from './weight-history.js';
 import {drawWeightTrend} from './weight-chart.js';
+import {dailyMotivation} from './motivation.js';
 import {watchForUpdates} from './pwa-updates.js';
 import {exerciseVideos} from './exercise-videos.js';
 import {MAX_SET_COUNT, MAX_SET_WEIGHT, completeWorkoutBlock, createWorkoutSession, normalizeSetHistory,
@@ -343,6 +344,7 @@ function homeView() {
   const remaining=energy?.target!=null?energy.target-used:null;
   const remainingText=remaining===null?'Hedef belirlenmedi':remaining>=0?`${number(remaining)} kcal hedefe kalan`:`${number(-remaining)} kcal hedefin üzerinde`;
   return `<section class="overview-head overview-cover"><div><p class="eyebrow">${escapeHTML(todayName())}</p><h1>Bugünün rotası${name}</h1><p class="subcopy">Günlük öğünlerini ve antrenmanını takip et.</p><div class="overview-actions"><button class="btn btn-primary" data-tab="nutrition">Öğün kaydet</button><button class="btn btn-secondary" data-tab="${state.workoutSession?'session':'training'}">${state.workoutSession?'Antrenmana dön':'Bölge seç ve çalış'}</button></div></div></section>
+  <aside class="daily-motivation" aria-label="Günün sözü"><strong>Günün sözü</strong><p data-daily-motivation>${escapeHTML(dailyMotivation())}</p></aside>
   ${bodyGoalsView()}
   ${weightHistoryView()}
   <div class="overview-grid">
@@ -835,6 +837,7 @@ function sessionStageView(session, workout) {
     return `<div class="session-step">
       <h2 tabindex="-1">Antrenmanı tamamladın</h2>
       <p>${session.sets.length} set kaydettin. Günlüğe girecek süreyi kontrol et.</p>
+      <p class="session-motivation" data-daily-motivation>${escapeHTML(dailyMotivation())}</p>
       <form id="session-finish-form">
         <div class="field"><label for="session-minutes">Kayda girecek süre (dk)</label><input type="number" id="session-minutes" name="minutes"
           min="1" max="${MAX_WORKOUT_MINUTES}" step="1" inputmode="numeric" value="${minutes}" required></div>
@@ -1950,12 +1953,21 @@ function isSafeToReload() {
   });
 }
 
+function refreshDailyMotivation() {
+  const quote = dailyMotivation();
+  document.querySelectorAll('[data-daily-motivation]').forEach(element => {
+    if (element.textContent !== quote) element.textContent = quote;
+  });
+}
+
 window.visualViewport?.addEventListener('resize',positionSessionSetDock);
 window.addEventListener('resize',paintWeightChart);
 window.visualViewport?.addEventListener('scroll',positionSessionSetDock);
 document.addEventListener('visibilitychange', () => {
   syncWorkoutClock();
+  if (!document.hidden) refreshDailyMotivation();
 });
+setInterval(refreshDailyMotivation,60000);
 async function init(){
   applyTheme();
   syncWorkoutClock(false);

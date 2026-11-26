@@ -5,6 +5,7 @@ import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {releaseScript} from '../scripts/pwa-release.mjs';
+import {dailyMotivation} from '../public/motivation.js';
 
 function parse(script) {
   return JSON.parse(script.slice('self.FITROTA_RELEASE = '.length,-2));
@@ -32,4 +33,13 @@ test('build revision follows asset and worker content while excluding the genera
   } finally {
     await rm(dir,{recursive:true,force:true});
   }
+});
+
+test('motivation quote is stable per date and changes on consecutive local dates', () => {
+  const days = ['2026-11-30','2026-12-01','2026-12-02'];
+  const quotes = days.map(date=>dailyMotivation(date));
+  assert.deepEqual(days.map(date=>dailyMotivation(date)),quotes);
+  assert.notEqual(quotes[0],quotes[1]);
+  assert.notEqual(quotes[1],quotes[2]);
+  assert.ok(quotes.every(quote=>quote.length>10));
 });
