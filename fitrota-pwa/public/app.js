@@ -2,6 +2,7 @@ import {calculateEnergy, ACTIVITY_LEVELS, dateKey} from './calorie.js';
 import {weightGoalProgress} from './body-goals.js';
 import {MAX_WEIGHT_KG, MIN_WEIGHT_KG, normalizeWeightHistory, upsertWeight, validWeightMeasurement, weightTrend} from './weight-history.js';
 import {drawWeightTrend} from './weight-chart.js';
+import {watchForUpdates} from './pwa-updates.js';
 import {exerciseVideos} from './exercise-videos.js';
 import {MAX_SET_COUNT, MAX_SET_WEIGHT, completeWorkoutBlock, createWorkoutSession, normalizeSetHistory,
   normalizeWorkoutSession, recordSessionSet, restRemaining, sessionWorkout, toggleSessionRest} from './workout-session.js';
@@ -1931,17 +1932,35 @@ document.addEventListener('submit',e=>{
     addWorkout(e.target);
   }
 });
+function isSafeToReload() {
+  if (busy || state.workoutSession) return false;
+  const changedFields = [...document.querySelectorAll('form input, form select, form textarea')].some(input => {
+    if (input.disabled || input.type === 'hidden') return false;
+    if (input.type === 'checkbox' || input.type === 'radio') return input.checked !== input.defaultChecked;
+    if (input.tagName === 'SELECT') {
+      const options = [...input.options];
+      return input.value !== (options.find(option => option.defaultSelected) ?? options[0])?.value;
+    }
+    return input.value !== input.defaultValue;
+  });
+  return !changedFields && [...customDrafts].every(([region,draft]) => {
+    const saved = state.customPlans[region];
+    if (!draft.exercises.length && !saved) return true;
+    return JSON.stringify(normalizeCustomPlan(draft)) === JSON.stringify(saved);
+  });
+}
+
 window.visualViewport?.addEventListener('resize',positionSessionSetDock);
 window.addEventListener('resize',paintWeightChart);
 window.visualViewport?.addEventListener('scroll',positionSessionSetDock);
-document.addEventListener('visibilitychange', () => syncWorkoutClock());
+document.addEventListener('visibilitychange', () => {
+  syncWorkoutClock();
+});
 async function init(){
   applyTheme();
   syncWorkoutClock(false);
   render();
-  if ('serviceWorker' in navigator && window.isSecureContext) {
-    navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).catch(()=>{});
-  }
+  watchForUpdates({isSafeToReload,notify});
   try{const response=await fetch('/api/status',{cache:'no-store'});if(response.ok){aiAvailable=Boolean((await response.json()).aiConfigured);updateAIControls();}}catch(_){/* Offline sürüm kullanılabilir. */}
 
 }

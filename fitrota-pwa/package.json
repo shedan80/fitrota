@@ -1,11 +1,12 @@
 {
   "name": "fitrota-pwa",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
   "type": "module",
   "description": "FitRota — calorie goals, food logging and workouts PWA",
   "scripts": {
     "dev": "node --watch server.mjs",
+    "build": "node scripts/pwa-release.mjs",
     "start": "node server.mjs",
     "test": "node --test"
   },

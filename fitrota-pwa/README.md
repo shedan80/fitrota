@@ -1,6 +1,6 @@
 # FitRota PWA
 
-FitRota 1.8.0, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, kilo geçmişi, kişisel besinler, tarifler, antrenman planları ve günlükler bu cihazdaki tarayıcıda saklanır.
+FitRota 1.9.0, ana ekrana eklenebilen bir **beslenme ve antrenman PWA’sı**. Node.js ile çalışır. Profil, kilo geçmişi, kişisel besinler, tarifler, antrenman planları ve günlükler bu cihazdaki tarayıcıda saklanır.
 
 **Hakkında** bölümü masaüstünde sol menüden, telefonda **Profilim → Hakkında** yolundan açılır.
 
@@ -26,6 +26,7 @@ MET değerleri için [2024 Adult Compendium of Physical Activities](https://paco
 Bölgesel seans kalori hesabı blok bazında `(MET − 1) × 3,5 × kilo × dakika / 200` formülünü kullanır. Kuvvet bloklarında hazırlık ve set araları ortalamaya dahildir. Süre değiştirildiğinde bloklar orantılı güncellenir. Kilo yoksa gösterilen 70 kg örneği kişisel kayda yazılmaz. Gerçek harcama tempon ve eforuna göre değişir.
 
 ### Temel özellikler
+
 
 - **Renk teması.** Sağ üstteki **Yeşil** ve **Pembe** düğmeleri uygulamanın renklerini değiştirir. Seçim aynı tarayıcıda korunur.
 
@@ -55,6 +56,14 @@ npm run dev
 4. Bilgisayarının tarayıcısında **http://localhost:3000** adresine git.
 
 Alternatif: `npm start` (otomatik yeniden başlatma yok). **npm install yapman gerekmiyor.**
+
+### GitHub ve Vercel’de PWA güncellemeleri
+
+GitHub’a `vercel.json`, `scripts/` ve uygulama dosyalarını birlikte gönder. Vercel projesinin kökü, `package.json` dosyasının bulunduğu dizindir. Vercel deploy sırasında `npm run build` ile `public/pwa-release.js` dosyasını üretir. Doğrudan statik klasör sunacaksan önce bu komutu çalıştır. Node sunucusu sürüm listesini yerelde kendisi üretir.
+
+Yeni sürümün dosyaları doğrulanıp indirildikten sonra **Yeni sürüm mevcut → Güncelle** duyurusu görünür. Aktif antrenman ve kaydedilmemiş formlar bitene kadar uygulama yenilemez. Eski FitRota önbellekleri yeni sürüm etkinleşince temizlenir. Günlükler, planlar ve profil aynı site adresindeki tarayıcı deposunda kalır. v1.8 ve öncesinden ilk geçişte yeni önbellek arka planda etkinleşir ve uygulama sonraki açılışta yeni sürümü gösterir.
+
+Önizleme testi için aynı Vercel dal adresinde iki ardışık dağıtım kullan. İlk dağıtımı açıp bir kayıt ekle. İkinci dağıtım tamamlanınca sekmeye dön ve **Güncelle** düğmesine dokun. Kaydın durduğunu ve bağlantı kapalıyken sayfanın açıldığını kontrol et.
 
 ## 2) Gerçek yapay zekâ (isteğe bağlı)
 

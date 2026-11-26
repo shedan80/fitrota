@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {WEEKDAYS as DAYS, MEAL_KEYS, validMealPortion} from './public/menus.js';
 import {ACTIVITIES, EQUIPMENT, validWorkoutMinutes} from './public/workouts.js';
+import {RELEASE_FILE, releaseScript} from './scripts/pwa-release.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.join(root, 'public');
@@ -141,12 +142,17 @@ async function serveFile(res,pathname){
   const filename=path.resolve(publicDir,'.'+urlpath);
   if(!filename.startsWith(publicDir+path.sep)){sendJson(res,403,{error:'Erişim engellendi.'});return;}
   try{
-    const info=await stat(filename);
-    if(!info.isFile())throw new Error('not a file');
-    const data=await readFile(filename);
+    let data;
+    if (urlpath === '/' + RELEASE_FILE) {
+      data = process.env.VERCEL ? await readFile(filename) : await releaseScript(publicDir);
+    } else {
+      const info=await stat(filename);
+      if(!info.isFile())throw new Error('not a file');
+      data=await readFile(filename);
+    }
     res.writeHead(200,{
       'Content-Type':mime[path.extname(filename)]||'application/octet-stream',
-      'Cache-Control':urlpath==='/sw.js'?'no-store':'public, max-age=300',
+      'Cache-Control':urlpath==='/sw.js'||urlpath==='/' + RELEASE_FILE?'no-store':'public, max-age=0, must-revalidate',
       'X-Content-Type-Options':'nosniff',
       'Referrer-Policy':'strict-origin-when-cross-origin',
       'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
